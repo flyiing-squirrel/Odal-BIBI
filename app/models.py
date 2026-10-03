@@ -1,13 +1,24 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Certification(Base):
@@ -26,15 +37,32 @@ class Certification(Base):
     schedules: Mapped[list["CertificationSchedule"]] = relationship(back_populates="certification")
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    google_sub: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    email: Mapped[str] = mapped_column(String(320))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    sessions: Mapped[list["CoachingSession"]] = relationship(back_populates="user")
+    calendar_connection: Mapped["GoogleCalendarConnection | None"] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
+    )
+
+
 class CoachingSession(Base):
     __tablename__ = "coaching_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     desired_job: Mapped[str] = mapped_column(String(200))
     major_experience: Mapped[str | None] = mapped_column(Text, nullable=True)
     owned_certifications: Mapped[list[str]] = mapped_column(JSON, default=list)
     target_acquisition_period: Mapped[str] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    user: Mapped[User | None] = relationship(back_populates="sessions")
 
     recommendations: Mapped[list["CertificationRecommendation"]] = relationship(
         back_populates="session",
@@ -98,10 +126,42 @@ class CertificationSchedule(Base):
     status: Mapped[str] = mapped_column(String(30))
     source_name: Mapped[str] = mapped_column(String(200))
     source_url: Mapped[str] = mapped_column(String(500))
+    source_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     session: Mapped[CoachingSession] = relationship(back_populates="schedules")
     recommendation: Mapped[CertificationRecommendation | None] = relationship(back_populates="schedules")
     certification: Mapped[Certification] = relationship(back_populates="schedules")
+
+
+class GoogleCalendarConnection(Base):
+    __tablename__ = "google_calendar_connections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    calendar_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    calendar_summary: Mapped[str] = mapped_column(String(200), default="Odal BIBI")
+    refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    granted_scopes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40), default="setup_required")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    user: Mapped[User] = relationship(back_populates="calendar_connection")
+
+
+class CalendarEventSync(Base):
+    __tablename__ = "calendar_event_syncs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "schedule_id", name="uq_calendar_sync_user_schedule"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    schedule_id: Mapped[int] = mapped_column(
+        ForeignKey("certification_schedules.id", ondelete="CASCADE"), index=True
+    )
+    calendar_id: Mapped[str] = mapped_column(String(500))
+    google_event_id: Mapped[str] = mapped_column(String(128))
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 

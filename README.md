@@ -1,6 +1,6 @@
 # Odal BIBI
 
-자격증 준비를 위한 대시보드 UI와 FastAPI 백엔드를 담은 저장소입니다. 현재 웹 UI 시안은 추천, 일정, 프로필, 채팅 네 영역만 제공합니다.
+자격증 준비를 위한 대시보드 UI와 FastAPI 백엔드를 담은 저장소입니다. 웹 화면은 추천, 일정, 프로필, 채팅 네 영역을 제공합니다.
 
 ## 대시보드 UI
 
@@ -12,9 +12,9 @@ npm run dev
 ```
 
 - 추천 카드와 비교 후보는 화면 예시 데이터입니다.
-- 공식 시험 일정은 UI에서 연결 전 상태로 표시하며 임의의 날짜를 넣지 않습니다.
+- 공식 시험 일정은 공식 출처 확인 전까지 UI와 Google Calendar에 기록하지 않습니다.
 - 프로필과 채팅 내역은 현재 브라우저의 `localStorage`에 저장됩니다.
-- 채팅은 시연용 응답을 사용하며, 현재 UI는 외부 AI/API를 호출하지 않습니다.
+- 추천과 채팅은 시연용 응답을 사용합니다. Google Calendar 연결은 FastAPI 백엔드와 연동됩니다.
 
 ## FastAPI 백엔드
 
@@ -33,6 +33,8 @@ npm run dev
 - 공식 일정 목록 및 일정별 상세 조회
 - 공식 사이트 연동용 `OfficialScheduleAdapter` 구조와 예시 mock adapter
 - 프론트엔드에서 바로 쓸 수 있는 통합 대시보드 응답
+- Google OAuth 연결, 사용자별 데이터 소유권, 암호화된 refresh token 저장
+- 앱 전용 `Odal BIBI` 캘린더 생성 및 공식 확인 일정의 멱등 추가 API
 
 ### 백엔드 실행
 
@@ -40,10 +42,23 @@ Python 3.11 이상을 권장합니다.
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
+Copy-Item .env.example .env # Windows PowerShell; macOS/Linux: cp .env.example .env
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
+
+Google Calendar 연결을 켜려면 `.env`에 다음 값을 설정하고, Google Cloud Console에서 Calendar API를 활성화한 웹 OAuth 클라이언트를 만드세요.
+
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_REDIRECT_URI`와 동일한 승인된 redirect URI: `http://localhost:8000/api/v1/calendar/google/callback`
+- `SESSION_SECRET`: `python -c "import secrets; print(secrets.token_urlsafe(48))"`로 생성
+- `GOOGLE_TOKEN_ENCRYPTION_KEY`: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`로 생성
+- 프론트엔드 `.env.local`의 `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000`
+
+운영 환경에서는 `SESSION_SECRET`과 Fernet 암호화 키를 비밀 저장소에 보관하고 HTTPS를 사용하세요. Fernet 키를 교체하면 저장된 refresh token을 복호화할 수 없으므로 기존 키를 백업하고 키 회전 절차를 마련해야 합니다. OAuth 테스트 모드와 사용자 승인 대상도 Google Cloud Console에서 확인해야 합니다.
 
 - Swagger UI: <http://localhost:8000/docs>
 - ReDoc: <http://localhost:8000/redoc>
@@ -84,6 +99,16 @@ SQLite 파일은 실행 위치에 `coach.db`로 생성됩니다. 다른 위치�
 - 일정 상세: `GET /api/v1/coaching/sessions/{session_id}/schedules/{schedule_id}`
 
 모든 상세 API는 부모 `session_id`도 함께 검증하므로 다른 세션의 데이터가 섞이지 않습니다.
+데이터 API는 Google 계정으로 연결된 사용자 세션을 요구하며, 새 세션은 해당 사용자에게 소유됩니다. 기존 사용자 소유권이 없는 세션은 자동으로 다른 계정에 할당하지 않습니다.
+
+### Google Calendar 연결
+
+- `GET /api/v1/calendar/google/connect`: Google OAuth 동의 화면으로 이동
+- `GET /api/v1/calendar/google/connection`: 연결 상태 확인
+- `DELETE /api/v1/calendar/google/connection`: refresh token 폐기 및 앱 내 연결 해제
+- `POST /api/v1/calendar/google/schedules/{schedule_id}`: 확인된 시험일을 전용 캘린더에 추가 또는 갱신
+
+앱은 `calendar.app.created` 범위로 자체 보조 캘린더만 생성하고 관리합니다. 개인 캘린더의 일정을 읽지 않습니다. 시험 일정은 저장 구조의 `source_verified`가 참이고 HTTPS 출처가 있을 때만 보낼 수 있습니다. 현재 기본 provider는 mock이므로 이 검증 표시가 꺼져 있고, 실제 날짜를 추가하려면 공식 기관 adapter가 출처를 확인한 뒤 검증 표시를 설정해야 합니다.
 
 ### 실제 LLM 연결 위치
 
@@ -116,6 +141,9 @@ LLM API key와 호출 코드는 서비스 계층에 넣지 않고 provider 안�
 - `certification_recommendations`: 세션별 추천 결과와 매칭 점수
 - `conversation_messages`: 사용자 입력과 LLM 요약 대화
 - `certification_schedules`: 추천 자격증별 시험·접수·합격 발표 일정과 원문 링크
+- `users`: Google의 안정적인 계정 식별자와 서비스 사용자
+- `google_calendar_connections`: 전용 캘린더 ID와 암호화된 refresh token
+- `calendar_event_syncs`: 사용자별 일정과 Google 이벤트의 멱등 매핑
 
 ### 테스트
 
@@ -125,4 +153,4 @@ pytest
 
 ### 다음 단계 제안
 
-운영 환경에서는 사용자 인증 및 세션 소유권, 일정 캐시/만료 정책, provider 호출 실패 상태(`pending`, `failed`), 비동기 작업 큐, 실제 자격증 master data 관리를 추가할 수 있습니다.
+일정 provider의 실제 기관 연동, 전체 대시보드 데이터의 API 전환, OAuth 운영 프로젝트의 검증과 배포 설정은 별도 후속 작업입니다.

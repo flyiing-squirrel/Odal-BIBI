@@ -150,6 +150,13 @@
 .schedule-alert { margin-bottom: 19px; background: #eef8f9; border-color: #d5edf0; }
 .schedule-alert [data-slot="alert-title"] { color: #174b56; }
 .schedule-alert [data-slot="alert-description"] { color: #506d72; line-height: 1.65; }
+.google-calendar-card { margin: -4px 0 18px; }
+.google-calendar-content { display: flex; align-items: center; gap: 13px; padding: 15px; }
+.google-calendar-copy { flex: 1; min-width: 0; }
+.google-calendar-copy strong { font-size: 12px; }
+.google-calendar-copy p { margin: 4px 0 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.6; }
+.calendar-feedback { display: block; margin-top: 5px; color: #27704a; font-size: 11px; }
+.calendar-feedback.error { color: #a33e36; }
 .schedule-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 13px; margin-bottom: 18px; }
 .schedule-step { min-height: 162px; box-shadow: 0 5px 22px #59401a08; }
 .schedule-step-content { display: flex; height: 100%; flex-direction: column; align-items: stretch; padding: 16px; }
@@ -249,6 +256,9 @@
   .schedule-step { min-height: 130px; }
   .schedule-step h3 { margin-top: 12px; }
   .schedule-source-content { align-items: flex-start; flex-wrap: wrap; }
+  .google-calendar-content { align-items: flex-start; flex-wrap: wrap; }
+  .google-calendar-copy { flex-basis: calc(100% - 52px); }
+  .google-calendar-content > button { margin-left: 51px; }
   .source-status { margin-left: 50px; }
   .profile-form-footer { align-items: flex-start; flex-direction: column; }
   .chat-thread { padding: 14px; }

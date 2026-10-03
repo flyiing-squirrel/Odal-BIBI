@@ -75,6 +75,7 @@ class ScheduleResponse(BaseModel):
     status: str
     source_name: str
     source_url: str
+    source_verified: bool
     details: str | None
     fetched_at: datetime
     certification: CertificationSummary

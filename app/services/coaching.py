@@ -5,12 +5,11 @@ from app.models import (
     Certification,
     CertificationRecommendation,
     CertificationSchedule,
-    ConversationMessage,
     CoachingSession,
+    ConversationMessage,
 )
 from app.providers.base import CoachingPrompt, LLMProvider, ScheduleProvider
 from app.schemas import DashboardResponse
-
 
 CATALOG = [
     {
@@ -73,6 +72,7 @@ class CoachingService:
     def create_session(
         self,
         db: Session,
+        user_id: int,
         desired_job: str,
         major_experience: str | None,
         owned_certifications: list[str],
@@ -80,6 +80,7 @@ class CoachingService:
     ) -> DashboardResponse:
         self.ensure_catalog(db)
         session = CoachingSession(
+            user_id=user_id,
             desired_job=desired_job,
             major_experience=major_experience,
             owned_certifications=owned_certifications,
@@ -141,15 +142,16 @@ class CoachingService:
                         status=schedule.status,
                         source_name=schedule.source_name,
                         source_url=schedule.source_url,
+                        source_verified=schedule.source_verified,
                         details=schedule.details,
                     )
                 )
 
         db.commit()
-        return self.get_dashboard(db, session.id)
+        return self.get_dashboard(db, user_id, session.id)
 
-    def get_dashboard(self, db: Session, session_id: int) -> DashboardResponse:
-        session = self._get_session(db, session_id)
+    def get_dashboard(self, db: Session, user_id: int, session_id: int) -> DashboardResponse:
+        session = self._get_session(db, user_id, session_id)
         return DashboardResponse(
             session=session,
             recommendations=session.recommendations,
@@ -157,14 +159,16 @@ class CoachingService:
             schedules=session.schedules,
         )
 
-    def get_recommendations(self, db: Session, session_id: int) -> list[CertificationRecommendation]:
-        session = self._get_session(db, session_id)
+    def get_recommendations(
+        self, db: Session, user_id: int, session_id: int
+    ) -> list[CertificationRecommendation]:
+        session = self._get_session(db, user_id, session_id)
         return list(session.recommendations)
 
     def get_recommendation(
-        self, db: Session, session_id: int, recommendation_id: int
+        self, db: Session, user_id: int, session_id: int, recommendation_id: int
     ) -> CertificationRecommendation:
-        self._get_session(db, session_id)
+        self._get_session(db, user_id, session_id)
         recommendation = db.scalar(
             select(CertificationRecommendation)
             .where(
@@ -182,12 +186,14 @@ class CoachingService:
             raise LookupError("Recommendation not found")
         return recommendation
 
-    def get_messages(self, db: Session, session_id: int) -> list[ConversationMessage]:
-        session = self._get_session(db, session_id)
+    def get_messages(self, db: Session, user_id: int, session_id: int) -> list[ConversationMessage]:
+        session = self._get_session(db, user_id, session_id)
         return list(session.messages)
 
-    def get_message(self, db: Session, session_id: int, message_id: int) -> ConversationMessage:
-        self._get_session(db, session_id)
+    def get_message(
+        self, db: Session, user_id: int, session_id: int, message_id: int
+    ) -> ConversationMessage:
+        self._get_session(db, user_id, session_id)
         message = db.scalar(
             select(ConversationMessage).where(
                 ConversationMessage.id == message_id,
@@ -198,12 +204,16 @@ class CoachingService:
             raise LookupError("Conversation message not found")
         return message
 
-    def get_schedules(self, db: Session, session_id: int) -> list[CertificationSchedule]:
-        session = self._get_session(db, session_id)
+    def get_schedules(
+        self, db: Session, user_id: int, session_id: int
+    ) -> list[CertificationSchedule]:
+        session = self._get_session(db, user_id, session_id)
         return list(session.schedules)
 
-    def get_schedule(self, db: Session, session_id: int, schedule_id: int) -> CertificationSchedule:
-        self._get_session(db, session_id)
+    def get_schedule(
+        self, db: Session, user_id: int, session_id: int, schedule_id: int
+    ) -> CertificationSchedule:
+        self._get_session(db, user_id, session_id)
         schedule = db.scalar(
             select(CertificationSchedule)
             .where(
@@ -217,10 +227,10 @@ class CoachingService:
         return schedule
 
     @staticmethod
-    def _get_session(db: Session, session_id: int) -> CoachingSession:
+    def _get_session(db: Session, user_id: int, session_id: int) -> CoachingSession:
         session = db.scalar(
             select(CoachingSession)
-            .where(CoachingSession.id == session_id)
+            .where(CoachingSession.id == session_id, CoachingSession.user_id == user_id)
             .options(
                 selectinload(CoachingSession.recommendations).selectinload(
                     CertificationRecommendation.certification

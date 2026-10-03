@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import get_current_user, require_same_origin
 from app.db import get_db
+from app.models import User
 from app.providers.mock_llm import MockLLMProvider
 from app.providers.official_schedule import MockOfficialScheduleAdapter, OfficialSiteScheduleProvider
 from app.schemas import (
@@ -40,10 +42,12 @@ def not_found(error: LookupError) -> HTTPException:
 )
 def create_coaching_session(
     payload: CoachInput,
+    user: User = Depends(get_current_user),
+    _: None = Depends(require_same_origin),
     db: Session = Depends(get_db),
     coaching_service: CoachingService = Depends(get_service),
 ) -> DashboardResponse:
-    return coaching_service.create_session(db, **payload.model_dump())
+    return coaching_service.create_session(db, user_id=user.id, **payload.model_dump())
 
 
 @router.get(
@@ -53,11 +57,12 @@ def create_coaching_session(
 )
 def get_dashboard(
     session_id: int,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     coaching_service: CoachingService = Depends(get_service),
 ) -> DashboardResponse:
     try:
-        return coaching_service.get_dashboard(db, session_id)
+        return coaching_service.get_dashboard(db, user.id, session_id)
     except LookupError as error:
         raise not_found(error) from error
 
@@ -69,12 +74,14 @@ def get_dashboard(
 )
 def get_recommendations(
     session_id: int,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     coaching_service: CoachingService = Depends(get_service),
 ) -> RecommendationListResponse:
     try:
         return RecommendationListResponse(
-            session_id=session_id, items=coaching_service.get_recommendations(db, session_id)
+            session_id=session_id,
+            items=coaching_service.get_recommendations(db, user.id, session_id),
         )
     except LookupError as error:
         raise not_found(error) from error
@@ -88,11 +95,12 @@ def get_recommendations(
 def get_recommendation(
     session_id: int,
     recommendation_id: int,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     coaching_service: CoachingService = Depends(get_service),
 ) -> RecommendationDetail:
     try:
-        return coaching_service.get_recommendation(db, session_id, recommendation_id)
+        return coaching_service.get_recommendation(db, user.id, session_id, recommendation_id)
     except LookupError as error:
         raise not_found(error) from error
 
@@ -104,12 +112,13 @@ def get_recommendation(
 )
 def get_conversation(
     session_id: int,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     coaching_service: CoachingService = Depends(get_service),
 ) -> MessageListResponse:
     try:
         return MessageListResponse(
-            session_id=session_id, items=coaching_service.get_messages(db, session_id)
+            session_id=session_id, items=coaching_service.get_messages(db, user.id, session_id)
         )
     except LookupError as error:
         raise not_found(error) from error
@@ -123,11 +132,12 @@ def get_conversation(
 def get_conversation_message(
     session_id: int,
     message_id: int,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     coaching_service: CoachingService = Depends(get_service),
 ) -> ConversationMessageResponse:
     try:
-        return coaching_service.get_message(db, session_id, message_id)
+        return coaching_service.get_message(db, user.id, session_id, message_id)
     except LookupError as error:
         raise not_found(error) from error
 
@@ -139,12 +149,13 @@ def get_conversation_message(
 )
 def get_schedules(
     session_id: int,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     coaching_service: CoachingService = Depends(get_service),
 ) -> ScheduleListResponse:
     try:
         return ScheduleListResponse(
-            session_id=session_id, items=coaching_service.get_schedules(db, session_id)
+            session_id=session_id, items=coaching_service.get_schedules(db, user.id, session_id)
         )
     except LookupError as error:
         raise not_found(error) from error
@@ -158,10 +169,11 @@ def get_schedules(
 def get_schedule(
     session_id: int,
     schedule_id: int,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     coaching_service: CoachingService = Depends(get_service),
 ) -> ScheduleResponse:
     try:
-        return coaching_service.get_schedule(db, session_id, schedule_id)
+        return coaching_service.get_schedule(db, user.id, session_id, schedule_id)
     except LookupError as error:
         raise not_found(error) from error

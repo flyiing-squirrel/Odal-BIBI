@@ -10,8 +10,10 @@ import {
   Clock3,
   Compass,
   FileCheck2,
+  Link2,
   MessageCircle,
   Send,
+  Unplug,
   UserRound,
   WalletCards,
 } from "lucide-react";
@@ -49,6 +51,16 @@ type Message = {
   role: "coach" | "user";
   text: string;
 };
+
+type CalendarConnection = {
+  configured: boolean;
+  connected: boolean;
+  status: string;
+  email: string | null;
+  calendar_name: string | null;
+};
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
 const PROFILE_KEY = "odal-bibi-profile";
 const CHAT_KEY = "odal-bibi-chat";
@@ -105,6 +117,14 @@ export default function Home() {
       // Ignore invalid local data and keep the sample profile.
     } finally {
       setIsHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("section") === "schedule") {
+      // OAuth returns to the schedule area after the account flow.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveSection("schedule");
     }
   }, []);
 
@@ -462,6 +482,66 @@ function SettingRow({ label, value }: { label: string; value: string }) {
 }
 
 function SchedulePanel() {
+  const [connection, setConnection] = useState<CalendarConnection | null>(null);
+  const [connectionError, setConnectionError] = useState("");
+  const [calendarNotice, setCalendarNotice] = useState("");
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
+
+  useEffect(() => {
+    let isCurrent = true;
+    const notice = new URLSearchParams(window.location.search).get("calendar");
+    const notices: Record<string, string> = {
+      connected: "Google Calendar 연결을 완료했어요.",
+      cancelled: "Google Calendar 연결을 취소했어요.",
+      reauthorize: "Google 재연결이 필요해요. 연결 버튼을 눌러 다시 동의해 주세요.",
+      setup_error: "Google 계정은 확인했지만 전용 캘린더를 만들지 못했어요. 다시 연결해 주세요.",
+    };
+
+    async function loadConnection() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/v1/calendar/google/connection`, {
+          credentials: "include",
+        });
+        if (!response.ok) throw new Error("연결 상태를 불러오지 못했어요.");
+        const data = (await response.json()) as CalendarConnection;
+        if (isCurrent) setConnection(data);
+      } catch {
+        if (isCurrent) setConnectionError("캘린더 서버에 연결할 수 없어요. 백엔드 실행 상태를 확인해 주세요.");
+      }
+      if (isCurrent && notice && notices[notice]) setCalendarNotice(notices[notice]);
+    }
+
+    void loadConnection();
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
+
+  function connectCalendar() {
+    // Google OAuth is hosted by the API origin, outside this Next.js route tree.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.href = `${API_BASE_URL}/api/v1/calendar/google/connect`;
+  }
+
+  async function disconnectCalendar() {
+    setIsDisconnecting(true);
+    setConnectionError("");
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/calendar/google/connection`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = (await response.json()) as CalendarConnection & { detail?: string };
+      if (!response.ok) throw new Error(data.detail || "연결을 해제하지 못했어요.");
+      setConnection(data);
+      setCalendarNotice("Google Calendar 연결을 해제했어요. 기존 캘린더 일정은 유지됩니다.");
+    } catch (error) {
+      setConnectionError(error instanceof Error ? error.message : "연결을 해제하지 못했어요.");
+    } finally {
+      setIsDisconnecting(false);
+    }
+  }
+
   return (
     <section className="schedule-panel" aria-labelledby="schedule-title">
       <div className="panel-heading">
@@ -485,6 +565,38 @@ function SchedulePanel() {
           확인 날짜와 함께 제공할 예정입니다.
         </AlertDescription>
       </Alert>
+
+      <Card className="google-calendar-card">
+        <CardContent className="google-calendar-content">
+          <span className="source-icon" aria-hidden="true">
+            <CalendarDays size={19} />
+          </span>
+          <div className="google-calendar-copy">
+            <strong>Google Calendar</strong>
+            <p>
+              {connection?.connected
+                ? `${connection.email} · ${connection.calendar_name}에 공식 시험일을 저장합니다.`
+                : "개인 일정은 읽지 않고, 공식 확인이 끝난 시험일만 Odal BIBI 캘린더에 추가합니다."}
+            </p>
+            {calendarNotice && <span className="calendar-feedback" role="status">{calendarNotice}</span>}
+            {connectionError && <span className="calendar-feedback error" role="alert">{connectionError}</span>}
+            {connection && !connection.configured && (
+              <span className="calendar-feedback">Google OAuth 설정 후 연결할 수 있어요.</span>
+            )}
+          </div>
+          {connection?.connected ? (
+            <Button variant="outline" onClick={disconnectCalendar} disabled={isDisconnecting}>
+              <Unplug aria-hidden="true" />
+              {isDisconnecting ? "해제 중…" : "연결 해제"}
+            </Button>
+          ) : (
+            <Button onClick={connectCalendar} disabled={!connection?.configured}>
+              <Link2 aria-hidden="true" />
+              Google 연결
+            </Button>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="schedule-grid">
         <ScheduleStep
