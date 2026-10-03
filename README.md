@@ -1,10 +1,28 @@
-# 자격증 패스 코치 백엔드
+# Odal BIBI
 
-희망직무, 전공 관련 경험, 보유 자격증, 목표 취득 시기를 입력받아 자격증 추천 결과·대화 내용·공식 자격증 일정을 대시보드에서 소비할 수 있는 형태로 제공하는 FastAPI 백엔드입니다.
+자격증 준비를 위한 대시보드 UI와 FastAPI 백엔드를 담은 저장소입니다. 현재 웹 UI 시안은 추천, 일정, 프로필, 채팅 네 영역만 제공합니다.
+
+## 대시보드 UI
+
+Next.js, Tailwind CSS, shadcn/ui 컴포넌트로 구현했습니다. NomadKit 디자인의 색상 토큰을 적용했습니다.
+
+```bash
+npm install
+npm run dev
+```
+
+- 추천 카드와 비교 후보는 화면 예시 데이터입니다.
+- 공식 시험 일정은 UI에서 연결 전 상태로 표시하며 임의의 날짜를 넣지 않습니다.
+- 프로필과 채팅 내역은 현재 브라우저의 `localStorage`에 저장됩니다.
+- 채팅은 시연용 응답을 사용하며, 현재 UI는 외부 AI/API를 호출하지 않습니다.
+
+## FastAPI 백엔드
+
+희망직무, 전공 관련 경험, 보유 자격증, 목표 취득 시기를 입력받아 자격증 추천 결과·대화 내용·공식 자격증 일정을 대시보드에서 소비할 수 있는 형태로 제공합니다.
 
 LLM(Groq)과 웹 검색(Tavily)은 교체 가능한 provider 뒤에 분리되어 있습니다. API key가 비어 있으면 결정론적인 mock 추천으로 동작하므로 key 없이도 로컬 개발이 가능합니다. 공식 일정은 아직 mock adapter입니다.
 
-## 주요 기능
+### 주요 기능
 
 - FastAPI REST API와 자동 OpenAPI 문서 (`/docs`)
 - Pydantic 입력/응답 스키마
@@ -17,7 +35,7 @@ LLM(Groq)과 웹 검색(Tavily)은 교체 가능한 provider 뒤에 분리되어
 - 공식 사이트 연동용 `OfficialScheduleAdapter` 구조와 예시 mock adapter
 - 프론트엔드에서 바로 쓸 수 있는 통합 대시보드 응답
 
-## 실행 방법
+### 백엔드 실행
 
 ```bash
 cp .env.example .env    # GROQ_API_KEY, TAVILY_API_KEY 채우기 (비워둬도 실행됨)
@@ -33,8 +51,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
-
-실행 후 다음 주소를 확인할 수 있습니다.
 
 - Swagger UI: <http://localhost:8000/docs>
 - ReDoc: <http://localhost:8000/redoc>
@@ -54,9 +70,9 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 - 배포 시에는 배포 서비스의 환경변수 설정이나 GitHub Secrets를 사용합니다. `.env`는 `.dockerignore`로 이미지에서도 제외됩니다.
 - 키가 커밋·push 되었다면 커밋 삭제만으로는 부족합니다. 즉시 해당 콘솔에서 키를 폐기하고 재발급합니다.
 
-## API 흐름
+### API 흐름
 
-### 1. 코칭 세션 생성
+#### 1. 코칭 세션 생성
 
 `POST /api/v1/coaching/sessions`
 
@@ -71,13 +87,13 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 }
 ```
 
-응답은 대시보드 첫 화면에 필요한 데이터를 한 번에 포함합니다. 각 항목에 있는 `id`를 사용해 상세 화면을 요청할 수 있습니다.
+응답은 대시보드 첫 화면에 필요한 데이터를 한 번에 포함합니다. 각 항목의 `id`로 상세 화면을 요청할 수 있습니다.
 
-### 2. 대시보드 재조회
+#### 2. 대시보드 재조회
 
 `GET /api/v1/coaching/sessions/{session_id}`
 
-### 3. 카드 클릭용 상세 조회
+#### 3. 카드 클릭용 상세 조회
 
 - 추천 목록: `GET /api/v1/coaching/sessions/{session_id}/recommendations`
 - 추천 상세: `GET /api/v1/coaching/sessions/{session_id}/recommendations/{recommendation_id}`
@@ -126,6 +142,11 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 `sources`는 대화 목록·상세 API의 메시지에도 포함됩니다. `notices`는 검색 미설정·검색 실패 등 처리 상태입니다.
 
 ## LLM·검색 연결 구조
+### 실제 LLM 연결 위치
+
+`app/providers/base.py`의 `LLMProvider` 계약을 구현한 클래스를 만들고, `app/api/routes.py`의 `MockLLMProvider()`를 해당 구현으로 교체합니다.
+
+LLM 구현은 다음 형태를 반환하면 됩니다.
 
 | 파일 | 역할 |
 | --- | --- |
@@ -137,7 +158,7 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 
 모델은 `.env`의 `GROQ_MODEL`로 바꿀 수 있습니다.
 
-## 실제 공식 일정 연결 위치
+### 실제 공식 일정 연결 위치
 
 `app/providers/official_schedule.py`의 `OfficialScheduleAdapter`를 구현하세요.
 
@@ -149,7 +170,7 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 
 기관별 사이트 구조가 달라 공통 provider에는 크롤링 코드를 넣지 않았습니다. 현재 mock 일정도 실제 연동과 동일한 응답 형태를 사용합니다.
 
-## 데이터 구조
+### 데이터 구조
 
 - `certifications`: 자격증 master/catalog
 - `coaching_sessions`: 사용자 입력과 생성 시각
@@ -157,13 +178,12 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 - `conversation_messages`: 사용자 입력과 LLM 대화, assistant 답변의 출처(`sources`)
 - `certification_schedules`: 추천 자격증별 시험·접수·합격 발표 일정과 원문 링크
 
-## 테스트
+### 테스트
 
 ```bash
 pytest
 ```
 
-## 다음 단계 제안
+### 다음 단계 제안
 
-운영 환경에서는 사용자 인증 및 세션 소유권, 일정 캐시/만료 정책, provider 호출 실패 상태(`pending`, `failed`), 비동기 작업 큐, 실제 자격증 master data 관리 기능을 추가하면 됩니다.
-
+운영 환경에서는 사용자 인증 및 세션 소유권, 일정 캐시/만료 정책, provider 호출 실패 상태(`pending`, `failed`), 비동기 작업 큐, 실제 자격증 master data 관리를 추가할 수 있습니다.

@@ -1,13 +1,39 @@
+# Node / Next.js
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+/.next/
+/out/
+/coverage/
+/.vercel/
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Python
 .venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.env
 coach.db
 *.sqlite3
-dist/
-build/
 *.egg-info/
+dist/
+/build/
 
+# Local secrets and OS files
+.env
+.env.*
+!.env.example
+.DS_Store
+*.pem
