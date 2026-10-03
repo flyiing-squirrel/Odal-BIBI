@@ -1,0 +1,9 @@
+.venv/
+.git/
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+*.sqlite3
+coach.db

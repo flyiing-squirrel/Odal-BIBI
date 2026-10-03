@@ -1,10 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.db import get_db
+from app.providers.groq_client import GroqClient, LLMError
+from app.providers.groq_llm import GroqLLMProvider
 from app.providers.mock_llm import MockLLMProvider
 from app.providers.official_schedule import MockOfficialScheduleAdapter, OfficialSiteScheduleProvider
+from app.providers.web_search import TavilySearchProvider
 from app.schemas import (
+    ChatMessageCreate,
+    ChatReplyResponse,
     CoachInput,
     ConversationMessageResponse,
     DashboardResponse,
@@ -14,18 +20,35 @@ from app.schemas import (
     ScheduleListResponse,
     ScheduleResponse,
 )
-from app.services.coaching import CoachingService
+from app.services.chat import ChatNotConfiguredError, ChatService
+from app.services.coaching import CATALOG, CoachingService
 
 
 router = APIRouter(prefix="/api/v1", tags=["coaching"])
+
+# API key가 비어 있으면 Groq/Tavily 대신 mock 또는 검색 없이 동작한다
+settings = get_settings()
+groq_client = GroqClient(settings.groq_api_key, settings.groq_model) if settings.groq_api_key else None
+search_provider = TavilySearchProvider(settings.tavily_api_key) if settings.tavily_api_key else None
+llm_provider = (
+    GroqLLMProvider(groq_client, CATALOG, fallback=MockLLMProvider(), search=search_provider)
+    if groq_client
+    else MockLLMProvider()
+)
+
 service = CoachingService(
-    llm_provider=MockLLMProvider(),
+    llm_provider=llm_provider,
     schedule_provider=OfficialSiteScheduleProvider(MockOfficialScheduleAdapter()),
 )
+chat_service = ChatService(groq_client, search_provider, settings.chat_history_limit)
 
 
 def get_service() -> CoachingService:
     return service
+
+
+def get_chat_service() -> ChatService:
+    return chat_service
 
 
 def not_found(error: LookupError) -> HTTPException:
@@ -165,3 +188,32 @@ def get_schedule(
         return coaching_service.get_schedule(db, session_id, schedule_id)
     except LookupError as error:
         raise not_found(error) from error
+
+
+@router.post(
+    "/coaching/sessions/{session_id}/messages",
+    response_model=ChatReplyResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="대화 이어가기 (요청 파악 → 검색 → 응답)",
+)
+def post_message(
+    session_id: int,
+    payload: ChatMessageCreate,
+    db: Session = Depends(get_db),
+    chat: ChatService = Depends(get_chat_service),
+) -> ChatReplyResponse:
+    try:
+        result = chat.reply(db, session_id, payload.message)
+    except LookupError as error:
+        raise not_found(error) from error
+    except ChatNotConfiguredError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+    except LLMError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+    return ChatReplyResponse(
+        session_id=session_id,
+        intent=result.intent,
+        user_message=result.user_message,
+        assistant_message=result.assistant_message,
+        notices=result.notices,
+    )

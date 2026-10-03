@@ -76,6 +76,8 @@ class ConversationMessage(Base):
     session_id: Mapped[int] = mapped_column(ForeignKey("coaching_sessions.id"), index=True)
     role: Mapped[str] = mapped_column(String(20))
     content: Mapped[str] = mapped_column(Text)
+    # assistant 답변의 근거 출처 [{title, url}]. 답변 본문의 [n]과 순서가 같다.
+    sources: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     session: Mapped[CoachingSession] = relationship(back_populates="messages")

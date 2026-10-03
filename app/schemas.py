@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CoachInput(BaseModel):
@@ -53,13 +53,37 @@ class RecommendationDetail(RecommendationSummary):
     schedules: list["ScheduleResponse"] = Field(default_factory=list)
 
 
+class SourceItem(BaseModel):
+    title: str
+    url: str
+
+
 class ConversationMessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     role: Literal["user", "assistant", "system"]
     content: str
+    sources: list[SourceItem] = Field(default_factory=list)
     created_at: datetime
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def none_to_empty(cls, value):
+        return value or []
+
+
+class ChatMessageCreate(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000, description="사용자 메시지")
+
+
+class ChatReplyResponse(BaseModel):
+    session_id: int
+    intent: Literal["recommend", "schedule", "study_path", "general"]
+    user_message: ConversationMessageResponse
+    assistant_message: ConversationMessageResponse
+    # 검색 미설정, 공식 사이트 결과 없음 등 사용자에게 알릴 처리 상태
+    notices: list[str]
 
 
 class ScheduleResponse(BaseModel):
