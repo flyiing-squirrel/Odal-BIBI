@@ -49,3 +49,14 @@ class ScheduleProvider(Protocol):
     def get_schedules(self, certification_code: str, target_period: str) -> list[ScheduleRecord]:
         """Return schedules from an official-site adapter or another trusted source."""
 
+
+@dataclass(frozen=True)
+class SearchHit:
+    title: str
+    url: str
+    content: str
+
+
+class SearchProvider(Protocol):
+    def search(self, query: str, *, official_only: bool = False, max_results: int = 4) -> list[SearchHit]:
+        """Return web search results. official_only restricts to official issuer domains."""
