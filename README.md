@@ -16,7 +16,23 @@ npm run dev
 - 프로필과 채팅 내역은 현재 브라우저의 `localStorage`에 저장됩니다.
 - 채팅은 시연용 응답을 사용하며, 현재 UI는 외부 AI/API를 호출하지 않습니다.
 
+## 폴더 구조
+
+```
+Odal-BIBI/
+├─ app/, components/, lib/, package.json ...   대시보드 UI (Next.js)
+├─ backend/                                     FastAPI 백엔드
+│  ├─ app/        API·서비스·provider
+│  ├─ tests/
+│  ├─ requirements.txt, pyproject.toml
+│  └─ Dockerfile
+├─ docker-compose.yml                           db(PostgreSQL) + api
+└─ .env.example                                 프론트·백엔드 공용 환경변수 템플릿
+```
+
 ## FastAPI 백엔드
+
+백엔드 코드는 `backend/`에 있으며, 아래 경로는 모두 `backend/` 기준입니다. `.env`는 저장소 루트에 하나만 둡니다.
 
 희망직무, 전공 관련 경험, 보유 자격증, 목표 취득 시기를 입력받아 자격증 추천 결과·대화 내용·공식 자격증 일정을 대시보드에서 소비할 수 있는 형태로 제공합니다.
 
@@ -46,6 +62,7 @@ DB만 Docker로 띄우고 API는 로컬에서 자동 재시작으로 개발할 �
 
 ```bash
 docker compose up -d db
+cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -58,7 +75,7 @@ uvicorn app.main:app --reload
 
 PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데이터는 `pgdata` 볼륨에 유지됩니다. 테이블은 앱 시작 시 `create_all`로 생성되므로, 모델 컬럼이 바뀌면 `docker compose down -v`로 볼륨을 지우고 다시 띄워야 합니다.
 
-## API 키 관리
+### API 키 관리
 
 | 파일 | git | 내용 |
 | --- | --- | --- |
@@ -67,7 +84,7 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 
 - Groq·Tavily 키는 각자 발급받아 자신의 `.env`에 넣습니다. 공용 키가 필요하면 비밀번호 관리자(1Password, Bitwarden 등) 공유 금고로 전달하고 채팅에 붙여넣지 않습니다.
 - 새 환경변수가 생기면 `.env.example`에 이름만 추가합니다.
-- 배포 시에는 배포 서비스의 환경변수 설정이나 GitHub Secrets를 사용합니다. `.env`는 `.dockerignore`로 이미지에서도 제외됩니다.
+- 배포 시에는 배포 서비스의 환경변수 설정이나 GitHub Secrets를 사용합니다. `.env`는 루트에 있어 백엔드 Docker 이미지(`backend/` 빌드)에 포함되지 않습니다.
 - 키가 커밋·push 되었다면 커밋 삭제만으로는 부족합니다. 즉시 해당 콘솔에서 키를 폐기하고 재발급합니다.
 
 ### API 흐름
@@ -104,7 +121,7 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 
 모든 상세 API는 부모 `session_id`도 함께 검증하므로 다른 세션의 데이터가 섞이지 않습니다.
 
-### 4. 대화 이어가기
+#### 4. 대화 이어가기
 
 `POST /api/v1/coaching/sessions/{session_id}/messages`
 
@@ -141,12 +158,7 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 
 `sources`는 대화 목록·상세 API의 메시지에도 포함됩니다. `notices`는 검색 미설정·검색 실패 등 처리 상태입니다.
 
-## LLM·검색 연결 구조
-### 실제 LLM 연결 위치
-
-`app/providers/base.py`의 `LLMProvider` 계약을 구현한 클래스를 만들고, `app/api/routes.py`의 `MockLLMProvider()`를 해당 구현으로 교체합니다.
-
-LLM 구현은 다음 형태를 반환하면 됩니다.
+### LLM·검색 연결 구조
 
 | 파일 | 역할 |
 | --- | --- |
@@ -181,6 +193,7 @@ LLM 구현은 다음 형태를 반환하면 됩니다.
 ### 테스트
 
 ```bash
+cd backend
 pytest
 ```
 

@@ -16,7 +16,7 @@ services:
       retries: 10
 
   api:
-    build: .
+    build: ./backend
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-odal}:${POSTGRES_PASSWORD:-odal}@db:5432/${POSTGRES_DB:-odal}
