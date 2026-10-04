@@ -12,7 +12,8 @@ class Base(DeclarativeBase):
 
 settings = get_settings()
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args, future=True)
+# 서버리스(Vercel)에서는 유휴 연결이 끊길 수 있어 사용 전에 확인한다
+engine = create_engine(settings.database_url, connect_args=connect_args, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 

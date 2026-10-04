@@ -8,8 +8,9 @@ from app.models import (
     ConversationMessage,
     CoachingSession,
 )
+from app.core.security import hash_value, new_session_token
 from app.providers.base import CoachingPrompt, LLMProvider, ScheduleProvider
-from app.schemas import DashboardResponse
+from app.schemas import DashboardResponse, SessionCreatedResponse
 
 
 CATALOG = [
@@ -77,13 +78,17 @@ class CoachingService:
         major_experience: str | None,
         owned_certifications: list[str],
         target_acquisition_period: str,
-    ) -> DashboardResponse:
+        client_ip_hash: str | None = None,
+    ) -> SessionCreatedResponse:
         self.ensure_catalog(db)
+        access_token = new_session_token()
         session = CoachingSession(
             desired_job=desired_job,
             major_experience=major_experience,
             owned_certifications=owned_certifications,
             target_acquisition_period=target_acquisition_period,
+            access_token_hash=hash_value(access_token),
+            client_ip_hash=client_ip_hash,
         )
         db.add(session)
         db.flush()
@@ -146,7 +151,8 @@ class CoachingService:
                 )
 
         db.commit()
-        return self.get_dashboard(db, session.id)
+        dashboard = self.get_dashboard(db, session.id)
+        return SessionCreatedResponse(**dict(dashboard), access_token=access_token)
 
     def get_dashboard(self, db: Session, session_id: int) -> DashboardResponse:
         session = self._get_session(db, session_id)

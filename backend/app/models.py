@@ -34,7 +34,11 @@ class CoachingSession(Base):
     major_experience: Mapped[str | None] = mapped_column(Text, nullable=True)
     owned_certifications: Mapped[list[str]] = mapped_column(JSON, default=list)
     target_acquisition_period: Mapped[str] = mapped_column(String(100))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    # 세션 생성 시 한 번만 발급하는 접근 토큰의 SHA-256. 이후 요청은 X-Session-Token 헤더로 검사한다.
+    access_token_hash: Mapped[str] = mapped_column(String(64))
+    # IP별 세션 생성 횟수 제한용 (원문 IP는 저장하지 않음)
+    client_ip_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
     recommendations: Mapped[list["CertificationRecommendation"]] = relationship(
         back_populates="session",
@@ -78,7 +82,7 @@ class ConversationMessage(Base):
     content: Mapped[str] = mapped_column(Text)
     # assistant 답변의 근거 출처 [{title, url}]. 답변 본문의 [n]과 순서가 같다.
     sources: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
     session: Mapped[CoachingSession] = relationship(back_populates="messages")
 

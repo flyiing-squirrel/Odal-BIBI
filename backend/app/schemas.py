@@ -111,6 +111,11 @@ class DashboardResponse(BaseModel):
     schedules: list[ScheduleResponse]
 
 
+class SessionCreatedResponse(DashboardResponse):
+    # 이 응답에서만 한 번 내려준다. 이후 모든 세션 요청에 X-Session-Token 헤더로 보내야 한다.
+    access_token: str
+
+
 class MessageListResponse(BaseModel):
     session_id: int
     items: list[ConversationMessageResponse]
