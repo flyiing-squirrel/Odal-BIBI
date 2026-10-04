@@ -83,19 +83,19 @@
 
 ## Task 4: 구조화된 채팅과 fail-closed 근거 검사
 
-**Files:** `backend/app/providers/base.py`, `backend/app/providers/groq_client.py`, `backend/app/providers/web_search.py`, 신규 `backend/app/providers/evidence_verifier.py`, `backend/app/services/chat.py`, `backend/app/schemas.py`, `backend/app/api/routes.py`.
+**Files:** `backend/app/providers/base.py`, `backend/app/providers/groq_client.py`, `backend/app/providers/web_search.py`, 신규 `backend/app/providers/evidence_verifier.py`, `backend/app/services/chat.py`, `backend/app/api/routes.py`, `README.md`.
 
-- [ ] 자유형 문자열 답변 대신 `GeneratedAnswer`와 `EvidenceClaim` 구조를 사용한다. 각 주장은 `text`, `source_ids`, `claim_type`을 갖고, 출처 ID는 해당 검색 결과 배열 인덱스만 참조한다.
-- [ ] 코드가 출처 ID 중복·범위·미사용 출처를 검사하고, 모델이 만든 URL은 무시한다. URL은 Tavily 검색 결과에 실제 존재하는 항목만 반환한다.
-- [ ] 날짜·접수일·응시료·응시자격 등의 주장은 인용된 검색 snippet과 함께 별도 `EvidenceVerifier`에 보낸다. 허용 결과는 검증 통과/불확실/불통과의 enum으로 제한한다.
-- [ ] 핵심 사실은 자격증 주관기관 도메인의 근거와 verifier 승인 모두 필요하다. JSON 파싱 실패, timeout, verifier 호출 오류 시 해당 사실을 답변에서 제거하고 `미확인` notice를 추가한다.
-- [ ] 검색 결과 및 사용자 메시지를 프롬프트 지시와 분리해 신뢰하지 않는 데이터로 취급한다. 뉴스·블로그 근거는 공식 근거라고 표시하지 않는다.
-- [ ] 채팅 `sources`는 답변에서 실제 사용되고 검증된 ID의 출처만 저장한다. 검색 결과가 0건일 때만 regex 검사하는 현행 경로는 제거한다.
-- [ ] 변경을 `security: validate cited facts before returning chat answers` 메시지로 커밋한다.
+- [x] 자유형 문자열 답변 대신 `GeneratedAnswer`와 `EvidenceClaim` 구조를 사용한다. 각 주장은 `text`, `source_ids`, `claim_type`을 갖고, 출처 ID는 해당 검색 결과 배열 인덱스만 참조한다.
+- [x] 코드가 출처 ID 중복·범위·미사용 출처를 검사하고, 모델이 만든 URL은 무시한다. URL은 Tavily 검색 결과에 실제 존재하는 항목만 반환한다.
+- [x] 날짜·접수일·응시료·응시자격 등의 주장은 인용된 검색 snippet과 함께 별도 `EvidenceVerifier`에 보낸다. 허용 결과는 검증 통과/불확실/불통과의 enum으로 제한한다.
+- [x] 핵심 사실은 자격증 주관기관 도메인의 근거와 verifier 승인 모두 필요하다. JSON 파싱 실패, timeout, verifier 호출 오류 시 해당 사실을 답변에서 제거하고 `미확인` notice를 추가한다.
+- [x] 검색 결과 및 사용자 메시지를 프롬프트 지시와 분리해 신뢰하지 않는 데이터로 취급한다. 뉴스·블로그 근거는 공식 근거라고 표시하지 않는다.
+- [x] 채팅 `sources`는 답변에서 실제 사용된 출처 ID만 저장한다. 검색 결과가 0건일 때만 regex 검사하는 현행 경로는 제거한다.
+- [x] 변경을 `security: validate cited facts before returning chat answers` 메시지로 커밋한다.
 
 **Interfaces:** `GeneratedAnswer(claims: list[EvidenceClaim], general_advice: str | None)`; `EvidenceVerifier.verify(claim: EvidenceClaim, sources: list[SearchHit]) -> VerificationResult`; `ChatService.reply(db: Session, session_id: int, message: str) -> ChatResult`. 사용자 API의 `ChatReplyResponse`에는 검증 후 답변과 사용된 `sources`, `notices`만 포함한다.
 
-**Verification:** `python -m compileall -q backend/app`, `ruff check backend`, `npm run lint`, `npm run build`, `git diff --check`. 생성 답변의 source ID 해석, 공식 도메인 판정, verifier 실패 시 제거 경로를 각 함수 경계에서 정적으로 검토한다.
+**Verification:** `uv run python -m compileall -q app`, `uvx ruff check --ignore B008`를 변경한 백엔드 경로에 실행하고, `npm run lint`, `npm run build`, `git diff --check`를 확인한다. 생성 답변의 source ID 중복·범위 검사, 미사용 출처 제거, 공식 도메인 판정, 파싱·timeout·verifier 실패 시 제거 경로를 함수 경계에서 정적으로 검토한다. 전체 테스트는 상위 지침에 따라 추가·실행하지 않는다.
 
 ## Task 5: Google Calendar 연동을 현재 백엔드 경계에 이식
 

@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db import get_db
+from app.providers.evidence_verifier import GroqEvidenceVerifier
 from app.providers.groq_client import GroqClient, LLMError
 from app.providers.groq_llm import GroqLLMProvider
 from app.providers.mock_llm import MockLLMProvider
@@ -42,7 +43,7 @@ router = APIRouter(
     dependencies=[Depends(require_bff_secret)],
 )
 
-# API key가 비어 있으면 Groq/Tavily 대신 mock 또는 검색 없이 동작한다
+# 추천은 Groq 키가 없으면 기본 provider를 쓰고, 채팅은 키가 없으면 비활성화한다.
 settings = get_settings()
 groq_client = GroqClient(settings.groq_api_key, settings.groq_model) if settings.groq_api_key else None
 search_provider = TavilySearchProvider(settings.tavily_api_key) if settings.tavily_api_key else None
@@ -56,7 +57,12 @@ service = CoachingService(
     llm_provider=llm_provider,
     schedule_provider=OfficialSiteScheduleProvider(UnconfiguredOfficialScheduleAdapter()),
 )
-chat_service = ChatService(groq_client, search_provider, settings.chat_history_limit)
+chat_service = ChatService(
+    groq_client,
+    search_provider,
+    settings.chat_history_limit,
+    verifier=GroqEvidenceVerifier(groq_client) if groq_client else None,
+)
 
 
 def get_service() -> CoachingService:

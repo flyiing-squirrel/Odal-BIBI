@@ -1,6 +1,9 @@
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Protocol
+from enum import StrEnum
+from typing import Annotated, Protocol
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 @dataclass(frozen=True)
@@ -65,3 +68,35 @@ class SearchHit:
 class SearchProvider(Protocol):
     def search(self, query: str, *, official_only: bool = False, max_results: int = 4) -> list[SearchHit]:
         """Return web search results. official_only restricts to official issuer domains."""
+
+
+class ClaimType(StrEnum):
+    GENERAL_ADVICE = "general_advice"
+    DATE = "date"
+    FEE = "fee"
+    ELIGIBILITY = "eligibility"
+    RESOURCE = "resource"
+    OTHER_FACT = "other_fact"
+
+
+class EvidenceClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    text: str = Field(min_length=1, max_length=1200)
+    source_ids: list[Annotated[int, Field(strict=True, ge=0, le=7)]] = Field(
+        default_factory=list, max_length=3
+    )
+    claim_type: ClaimType
+
+
+class GeneratedAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    claims: list[EvidenceClaim] = Field(default_factory=list, max_length=6)
+    general_advice: str | None = Field(default=None, max_length=2000)
+
+
+class VerificationResult(StrEnum):
+    SUPPORTED = "supported"
+    UNCERTAIN = "uncertain"
+    UNSUPPORTED = "unsupported"

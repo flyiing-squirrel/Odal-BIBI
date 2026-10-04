@@ -12,7 +12,7 @@ class GroqClient:
     """Groq chat completion 호출 래퍼. API key와 호출 코드는 이 클래스 안에만 둔다."""
 
     def __init__(self, api_key: str, model: str):
-        self._client = Groq(api_key=api_key)
+        self._client = Groq(api_key=api_key, timeout=15.0, max_retries=0)
         self.model = model
 
     def complete(
@@ -33,7 +33,7 @@ class GroqClient:
                 **extra,
             )
         except groq.APIError as error:
-            raise LLMError(f"Groq 호출 실패: {error}") from error
+            raise LLMError("Groq 호출 실패") from error
         return response.choices[0].message.content or ""
 
     def complete_json(self, messages: list[dict], **kwargs) -> dict:
@@ -41,4 +41,4 @@ class GroqClient:
         try:
             return json.loads(text)
         except json.JSONDecodeError as error:
-            raise LLMError(f"JSON 파싱 실패: {text[:200]}") from error
+            raise LLMError("Groq JSON 응답을 읽지 못했습니다.") from error
