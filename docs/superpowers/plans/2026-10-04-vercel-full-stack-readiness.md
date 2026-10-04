@@ -99,18 +99,19 @@
 
 ## Task 5: Google Calendar 연동을 현재 백엔드 경계에 이식
 
-**Files:** `backend/app/models.py`, `backend/app/schemas.py`, `backend/app/core/config.py`, `backend/app/api/routes.py`, 신규 `backend/app/services/calendar.py`, 신규 `backend/app/providers/google_calendar.py`, 신규 migration, 신규 `app/api/google/callback/route.ts`, `.env.example`.
+**Files:** `backend/app/models.py`, `backend/app/schemas.py`, `backend/app/core/config.py`, `backend/app/api/routes.py`, `backend/app/providers/base.py`, `backend/app/services/coaching.py`, 신규 `backend/app/services/calendar.py`, 신규 `backend/app/providers/google_calendar.py`, 신규 migration, 신규 `app/api/google/callback/route.ts`, `app/page.tsx`, `lib/api.ts`, `backend/pyproject.toml`, `backend/requirements.txt`, `backend/uv.lock`, `.env.example`.
 
-- [ ] `origin/feat/google-calendar`는 병합하지 않는다. 현재 `backend/app`과 Groq/Tavily·근거 검증 코드를 유지하면서 OAuth·Calendar 동작 중 필요한 부분만 옮긴다.
-- [ ] 연결 시작 endpoint는 고정 redirect URI를 사용한 Google authorization URL을 반환하고, 난수 `state`의 해시·세션 ID·만료 시각을 DB에 저장한다. 외부 callback은 same-origin Next.js `/api/google/callback`에서 받아 BFF 비밀값과 세션 쿠키를 붙여 백엔드에 전달한다.
-- [ ] OAuth callback은 state를 한 번만 소비하고, state에 묶인 세션과 요청 Bearer 토큰의 소유권을 확인한다. redirect URI·최소 scope를 고정한다. refresh token은 키 버전이 있는 AEAD 방식으로 암호화해 DB에 저장하고, 암호화 키는 서버 환경변수로만 둔다.
-- [ ] 연결 해제 시 DB token을 삭제하고 Google revoke를 요청한다. revoke 실패와 token 만료는 안전한 상태로 사용자에게 표시한다.
-- [ ] 공식 출처가 확인된 일정만 Google Calendar에 생성/갱신한다. mock/미확인 일정은 동기화하지 않는다. 반복 동기화는 저장된 Google event ID를 기준으로 기존 일정을 갱신해 중복 생성을 막는다.
-- [ ] 변경을 `feat: secure Google Calendar session integration` 메시지로 커밋한다.
+- [x] `origin/feat/google-calendar`는 병합하지 않는다. 현재 `backend/app`과 Groq/Tavily·근거 검증 코드를 유지하면서 OAuth·Calendar 동작 중 필요한 부분만 옮긴다.
+- [x] 연결 시작 endpoint는 고정 redirect URI를 사용한 Google authorization URL을 반환하고, 난수 `state`의 해시·세션 ID·만료 시각을 DB에 저장한다. 외부 callback은 same-origin Next.js `/api/google/callback`에서 받아 BFF 비밀값과 세션 쿠키를 붙여 백엔드에 전달한다.
+- [x] OAuth callback은 state를 한 번만 소비하고, state에 묶인 세션과 요청 Bearer 토큰의 소유권을 확인한다. redirect URI·최소 scope를 고정한다. refresh token은 키 버전이 있는 AEAD 방식으로 암호화해 DB에 저장하고, 암호화 키는 서버 환경변수로만 둔다.
+- [x] 연결 해제 시 DB token을 삭제하고 Google revoke를 요청한다. revoke 실패와 token 만료는 안전한 상태로 사용자에게 표시한다.
+- [x] 공식 출처가 확인된 일정만 Google Calendar에 생성/갱신한다. mock/미확인 일정은 동기화하지 않는다. 반복 동기화는 저장된 Google event ID를 기준으로 기존 일정을 갱신해 중복 생성을 막는다.
+- [x] 일정 탭에서 연결 상태·연결·해제·확인 일정 동기화를 사용할 수 있게 연결한다. 현재 공식 provider가 비어 있으므로 검증된 일정이 없을 때는 동기화 버튼을 노출하지 않는다.
+- [x] 변경을 `feat: secure Google Calendar session integration` 메시지로 커밋한다.
 
 **Interfaces:** `POST /api/v1/coaching/sessions/{session_id}/calendar/connect`는 authorization URL을 반환한다. `POST /api/v1/calendar/callback`은 `code`와 `state`를 받고 BFF secret을 요구한다. state 해시로 연결된 session ID를 찾은 뒤 해당 ID와 Bearer 토큰의 소유권을 검증하고 state를 원자적으로 한 번만 소비한다. `DELETE /api/v1/coaching/sessions/{session_id}/calendar`는 연결을 끊는다. OAuth callback URI는 Vercel 프런트 프로젝트의 `/api/google/callback` 한 곳으로 고정한다.
 
-**Verification:** `npm run lint`, `npm run build`, `python -m compileall -q backend/app`, `ruff check backend`, `git diff --check`. branch에서 이식한 코드가 루트 `app/`로 백엔드를 옮기거나 현재 LLM/provider 파일을 삭제하지 않았는지 `git diff`로 확인한다.
+**Verification:** `npm run lint`, `npm run build`, `uv run python -m compileall -q app`, SQLAlchemy mapper configuration, `uv run alembic upgrade --sql head`, `uv lock --check`, `uvx ruff check --ignore B008 --exclude tests .`, `git diff --check`. 전체 Ruff는 기존 FastAPI `Depends()` B008 규칙과 `tests/`의 두 import 정렬 항목 때문에 통과하지 않으며, 변경 코드에서 B008 외 규칙은 확인한다. OAuth callback 실사용·온라인 migration은 Google OAuth client 및 DB가 설정될 때 확인한다. branch에서 이식한 코드가 루트 `app/`로 백엔드를 옮기거나 현재 LLM/provider 파일을 삭제하지 않았는지 `git diff`로 확인한다.
 
 ## Task 6: 배포 의존성·Vercel 환경변수 문서 준비
 

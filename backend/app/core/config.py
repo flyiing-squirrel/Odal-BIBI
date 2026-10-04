@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     groq_model: str = "openai/gpt-oss-120b"
     tavily_api_key: str = ""
     bff_shared_secret: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""
+    google_token_encryption_current_version: str = "v1"
+    google_token_encryption_key_v1: str = ""
+    google_token_encryption_key_v2: str = ""
     session_creation_limit_per_hour: int = Field(default=5, ge=1, le=100)
     profile_updates_per_hour: int = Field(default=5, ge=1, le=100)
     chat_messages_per_hour: int = Field(default=30, ge=1, le=1000)
@@ -34,6 +40,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def google_oauth_configured(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret and self.google_redirect_uri)
 
 
 @lru_cache

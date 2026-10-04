@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class CoachInput(BaseModel):
@@ -116,6 +116,7 @@ class ScheduleResponse(BaseModel):
     status: str
     source_name: str
     source_url: str
+    source_verified: bool
     details: str | None
     fetched_at: datetime
     certification: CertificationSummary
@@ -145,4 +146,39 @@ class RecommendationListResponse(BaseModel):
 class ScheduleListResponse(BaseModel):
     session_id: int
     items: list[ScheduleResponse]
+
+
+class GoogleCalendarStatusResponse(BaseModel):
+    connected: bool
+    requires_reauthorization: bool = False
+    calendar_name: str | None = None
+
+
+class GoogleCalendarConnectResponse(BaseModel):
+    authorization_url: str
+
+
+class GoogleOAuthCallbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    state: str = Field(min_length=32, max_length=256)
+    code: str | None = Field(default=None, min_length=1, max_length=4096)
+    error: str | None = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def code_or_error_required(self):
+        if self.code is None and self.error is None:
+            raise ValueError("OAuth callback is incomplete")
+        if self.code is not None and self.error is not None:
+            raise ValueError("OAuth callback is ambiguous")
+        return self
+
+
+class GoogleOAuthCallbackResponse(BaseModel):
+    status: Literal["connected", "cancelled"]
+
+
+class CalendarEventSyncResponse(BaseModel):
+    synced: bool
+    event_id: str
 

@@ -1,6 +1,17 @@
 from datetime import UTC, date, datetime
 
-from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -54,6 +65,12 @@ class CoachingSession(Base):
         cascade="all, delete-orphan",
         order_by="CertificationSchedule.exam_date",
     )
+    google_oauth_states: Mapped[list["GoogleOAuthState"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+    google_calendar_connection: Mapped["GoogleCalendarConnection | None"] = relationship(
+        back_populates="session", cascade="all, delete-orphan", uselist=False
+    )
 
 
 class CertificationRecommendation(Base):
@@ -105,12 +122,69 @@ class CertificationSchedule(Base):
     status: Mapped[str] = mapped_column(String(30))
     source_name: Mapped[str] = mapped_column(String(200))
     source_url: Mapped[str] = mapped_column(String(500))
+    source_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     session: Mapped[CoachingSession] = relationship(back_populates="schedules")
     recommendation: Mapped[CertificationRecommendation | None] = relationship(back_populates="schedules")
     certification: Mapped[Certification] = relationship(back_populates="schedules")
+    calendar_event_sync: Mapped["CalendarEventSync | None"] = relationship(
+        back_populates="schedule", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class GoogleOAuthState(Base):
+    __tablename__ = "google_oauth_states"
+
+    state_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("coaching_sessions.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+    session: Mapped[CoachingSession] = relationship(back_populates="google_oauth_states")
+
+
+class GoogleCalendarConnection(Base):
+    __tablename__ = "google_calendar_connections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("coaching_sessions.id", ondelete="CASCADE"), unique=True
+    )
+    calendar_id: Mapped[str] = mapped_column(String(500))
+    calendar_name: Mapped[str] = mapped_column(String(200))
+    encrypted_refresh_token: Mapped[str] = mapped_column(Text)
+    granted_scopes: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="connected")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+    session: Mapped[CoachingSession] = relationship(back_populates="google_calendar_connection")
+
+
+class CalendarEventSync(Base):
+    __tablename__ = "calendar_event_syncs"
+    __table_args__ = (UniqueConstraint("session_id", "schedule_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("coaching_sessions.id", ondelete="CASCADE"), index=True
+    )
+    schedule_id: Mapped[int] = mapped_column(
+        ForeignKey("certification_schedules.id", ondelete="CASCADE"), index=True
+    )
+    google_calendar_id: Mapped[str] = mapped_column(String(500))
+    google_event_id: Mapped[str] = mapped_column(String(128))
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+    schedule: Mapped[CertificationSchedule] = relationship(back_populates="calendar_event_sync")
 
 
 class RequestRateLimit(Base):

@@ -60,9 +60,25 @@ export interface ScheduleResponse {
   status: string;
   source_name: string;
   source_url: string;
+  source_verified: boolean;
   details: string | null;
   fetched_at: string;
   certification: CertificationSummary;
+}
+
+export interface GoogleCalendarStatus {
+  connected: boolean;
+  requires_reauthorization: boolean;
+  calendar_name: string | null;
+}
+
+interface GoogleCalendarConnectResponse {
+  authorization_url: string;
+}
+
+interface CalendarEventSyncResponse {
+  synced: boolean;
+  event_id: string;
 }
 
 export interface DashboardResponse {
@@ -146,5 +162,26 @@ export function sendMessage(
   return request(`${sessionPath(sessionId)}/messages`, {
     method: "POST",
     body: JSON.stringify({ message }),
+  });
+}
+
+export function getGoogleCalendarStatus(sessionId: number): Promise<GoogleCalendarStatus> {
+  return request(`${sessionPath(sessionId)}/calendar`);
+}
+
+export function connectGoogleCalendar(sessionId: number): Promise<GoogleCalendarConnectResponse> {
+  return request(`${sessionPath(sessionId)}/calendar/connect`, { method: "POST" });
+}
+
+export function disconnectGoogleCalendar(sessionId: number): Promise<GoogleCalendarStatus> {
+  return request(`${sessionPath(sessionId)}/calendar`, { method: "DELETE" });
+}
+
+export function syncScheduleToGoogleCalendar(
+  sessionId: number,
+  scheduleId: number,
+): Promise<CalendarEventSyncResponse> {
+  return request(`${sessionPath(sessionId)}/calendar/schedules/${scheduleId}`, {
+    method: "POST",
   });
 }

@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -177,9 +179,41 @@ class CoachingService:
                         status=schedule.status,
                         source_name=schedule.source_name,
                         source_url=schedule.source_url,
+                        source_verified=(
+                            schedule.source_verified
+                            and self._official_source_matches(schedule.source_url, certification.official_url)
+                        ),
                         details=schedule.details,
                     )
                 )
+
+    @staticmethod
+    def _official_source_matches(source_url: str, official_url: str) -> bool:
+        try:
+            source = urlsplit(source_url)
+            official = urlsplit(official_url)
+            source_host = source.hostname
+            official_host = official.hostname
+            source_port = source.port
+            official_port = official.port
+        except ValueError:
+            return False
+        if (
+            source.scheme != "https"
+            or official.scheme != "https"
+            or not source_host
+            or not official_host
+            or source_port not in (None, 443)
+            or official_port not in (None, 443)
+            or source.username
+            or source.password
+            or official.username
+            or official.password
+        ):
+            return False
+        source_host = source_host.lower().rstrip(".")
+        official_host = official_host.lower().rstrip(".")
+        return source_host == official_host or source_host.endswith(f".{official_host}")
 
     @staticmethod
     def _prompt_for(session: CoachingSession) -> CoachingPrompt:

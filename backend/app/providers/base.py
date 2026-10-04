@@ -51,6 +51,7 @@ class ScheduleRecord:
     source_name: str
     source_url: str
     details: str | None = None
+    source_verified: bool = False
 
 
 class ScheduleProvider(Protocol):

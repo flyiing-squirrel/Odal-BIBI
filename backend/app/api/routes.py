@@ -1,9 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.security import HTTPAuthorizationCredentials
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db import get_db
 from app.providers.evidence_verifier import GroqEvidenceVerifier
+from app.providers.google_calendar import (
+    CalendarIntegrationError,
+    CalendarReauthorizationRequired,
+)
 from app.providers.groq_client import GroqClient, LLMError
 from app.providers.groq_llm import GroqLLMProvider
 from app.providers.mock_llm import MockLLMProvider
@@ -13,12 +19,17 @@ from app.providers.official_schedule import (
 )
 from app.providers.web_search import TavilySearchProvider
 from app.schemas import (
+    CalendarEventSyncResponse,
     ChatMessageCreate,
     ChatReplyResponse,
     CoachInput,
     ConversationMessageResponse,
     CreateSessionResponse,
     DashboardResponse,
+    GoogleCalendarConnectResponse,
+    GoogleCalendarStatusResponse,
+    GoogleOAuthCallbackRequest,
+    GoogleOAuthCallbackResponse,
     MessageListResponse,
     ProfileUpdate,
     RecommendationDetail,
@@ -27,12 +38,26 @@ from app.schemas import (
     ScheduleResponse,
 )
 from app.security import (
+    bearer_scheme,
     clear_session_rate_limit,
     create_session_token,
     enforce_rate_limit,
     hash_session_token,
     require_bff_secret,
     require_session_owner,
+)
+from app.services.calendar import (
+    CalendarAlreadyConnectedError,
+    CalendarNotConfiguredError,
+    CalendarNotConnectedError,
+    CalendarScheduleNotVerifiedError,
+    InvalidOAuthCallbackError,
+    calendar_status,
+    complete_calendar_connection,
+    consume_oauth_state,
+    disconnect_calendar,
+    start_calendar_connection,
+    sync_verified_schedule,
 )
 from app.services.chat import ChatNotConfiguredError, ChatService
 from app.services.coaching import CATALOG, CoachingService
@@ -329,4 +354,152 @@ def delete_coaching_session(
         coaching_service.delete_session(db, session_id)
     except LookupError as error:
         raise not_found(error) from error
+
+
+@router.get(
+    "/coaching/sessions/{session_id}/calendar",
+    response_model=GoogleCalendarStatusResponse,
+    summary="Google Calendar 연결 상태",
+    dependencies=[Depends(require_session_owner)],
+)
+def get_google_calendar_status(
+    session_id: int,
+    db: Session = Depends(get_db),
+) -> GoogleCalendarStatusResponse:
+    return GoogleCalendarStatusResponse(**calendar_status(db, session_id))
+
+
+@router.post(
+    "/coaching/sessions/{session_id}/calendar/connect",
+    response_model=GoogleCalendarConnectResponse,
+    summary="Google Calendar 연결 시작",
+    dependencies=[Depends(require_session_owner)],
+)
+def connect_google_calendar(
+    session_id: int,
+    db: Session = Depends(get_db),
+) -> GoogleCalendarConnectResponse:
+    try:
+        return GoogleCalendarConnectResponse(
+            authorization_url=start_calendar_connection(db, session_id, get_settings())
+        )
+    except CalendarNotConfiguredError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google Calendar is not configured",
+        ) from error
+    except CalendarAlreadyConnectedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Disconnect the current Google Calendar connection before connecting again",
+        ) from error
+    except CalendarIntegrationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Google Calendar is temporarily unavailable",
+        ) from error
+
+
+@router.post(
+    "/coaching/sessions/{session_id}/calendar/schedules/{schedule_id}",
+    response_model=CalendarEventSyncResponse,
+    summary="확인된 시험 일정을 Google Calendar에 동기화",
+    dependencies=[Depends(require_session_owner)],
+)
+def sync_google_calendar_schedule(
+    session_id: int,
+    schedule_id: int,
+    db: Session = Depends(get_db),
+) -> CalendarEventSyncResponse:
+    try:
+        event_id = sync_verified_schedule(
+            db,
+            session_id=session_id,
+            schedule_id=schedule_id,
+            settings=get_settings(),
+        )
+    except CalendarNotConnectedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Google Calendar is not connected",
+        ) from error
+    except CalendarScheduleNotVerifiedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only verified official schedules can be synchronized",
+        ) from error
+    except CalendarReauthorizationRequired as error:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Reconnect Google Calendar to continue syncing",
+        ) from error
+    except CalendarIntegrationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Google Calendar could not complete the request",
+        ) from error
+    return CalendarEventSyncResponse(synced=True, event_id=event_id)
+
+
+@router.delete(
+    "/coaching/sessions/{session_id}/calendar",
+    response_model=GoogleCalendarStatusResponse,
+    summary="Google Calendar 연결 해제",
+    dependencies=[Depends(require_session_owner)],
+)
+def disconnect_google_calendar(
+    session_id: int,
+    db: Session = Depends(get_db),
+) -> GoogleCalendarStatusResponse:
+    try:
+        disconnect_calendar(db, session_id, get_settings())
+    except CalendarIntegrationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Google authorization could not be revoked; the connection was retained",
+        ) from error
+    return GoogleCalendarStatusResponse(**calendar_status(db, session_id))
+
+
+@router.post(
+    "/calendar/callback",
+    response_model=GoogleOAuthCallbackResponse,
+    summary="Google Calendar OAuth callback",
+)
+def google_calendar_callback(
+    payload: GoogleOAuthCallbackRequest,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> GoogleOAuthCallbackResponse:
+    try:
+        session_id = consume_oauth_state(
+            db,
+            state=payload.state,
+            bearer_token=credentials.credentials if credentials else None,
+        )
+    except InvalidOAuthCallbackError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google Calendar authorization could not be verified",
+        ) from error
+
+    if payload.error is not None:
+        return GoogleOAuthCallbackResponse(status="cancelled")
+    try:
+        complete_calendar_connection(
+            db, session_id=session_id, code=payload.code or "", settings=get_settings()
+        )
+    except CalendarIntegrationError as error:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Google Calendar connection could not be completed",
+        ) from error
+    except (SQLAlchemyError, ValueError):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Google Calendar connection could not be completed",
+        ) from None
+    return GoogleOAuthCallbackResponse(status="connected")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
