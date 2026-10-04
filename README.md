@@ -27,9 +27,10 @@ Odal-BIBI/
 ├─ backend/                                     FastAPI 백엔드
 │  ├─ app/        API·서비스·provider
 │  ├─ tests/
-│  ├─ requirements.txt, pyproject.toml
-│  └─ Dockerfile
-├─ docker-compose.yml                           db(PostgreSQL) + api
+│  ├─ requirements.txt, requirements-dev.txt, pyproject.toml
+│  ├─ vercel.json   Vercel 함수 설정 (Root Directory = backend)
+│  └─ Dockerfile    (선택) 컨테이너 실행용
+├─ docker-compose.yml                           (선택) db(PostgreSQL) + api
 └─ .env.example                                 프론트·백엔드 공용 환경변수 템플릿
 ```
 
@@ -46,7 +47,9 @@ LLM(Groq)과 웹 검색(Tavily)은 교체 가능한 provider 뒤에 분리되어
 - FastAPI REST API와 자동 OpenAPI 문서 (`/docs`)
 - Pydantic 입력/응답 스키마
 - 서비스 계층과 provider 계층 분리
-- PostgreSQL 기반 세션·추천·대화·일정 저장 (Docker Compose)
+- 세션·추천·대화·일정 저장: 로컬은 SQLite(설정 없이 바로), 배포는 PostgreSQL(Neon)
+- 세션별 접근 토큰(`X-Session-Token`)으로 소유자만 조회·대화 가능
+- LLM 비용 보호용 요청 제한: 세션당 메시지 수, IP당 세션 생성 수
 - Groq LLM 추천 + 세션 대화 이어가기 (요청 파악 → 웹 검색 → 근거 기반 응답)
 - 추천 자격증 목록 및 항목별 상세 조회
 - 대화 목록 및 메시지별 상세 조회
@@ -56,7 +59,7 @@ LLM(Groq)과 웹 검색(Tavily)은 교체 가능한 provider 뒤에 분리되어
 - 공식 사이트 연동용 `OfficialScheduleAdapter` 구조와 미설정 상태의 빈 adapter
 - 프론트엔드에서 바로 쓸 수 있는 통합 대시보드 응답
 
-### 백엔드 실행
+### 백엔드 실행 (Docker 없이)
 
 ```bash
 cp .env.example .env    # BFF_SHARED_SECRET와 보유한 GROQ_API_KEY, TAVILY_API_KEY 설정
@@ -66,14 +69,16 @@ docker compose up --build
 DB만 Docker로 띄우고 API는 로컬에서 자동 재시작으로 개발할 수도 있습니다. 백엔드 실행에는 Python 3.12가 필요합니다.
 
 ```bash
-docker compose up -d db
+cp .env.example .env
 cd backend
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
+
+`.env`의 `GROQ_API_KEY`, `TAVILY_API_KEY`는 비워도 실행됩니다. 이 경우 추천은 mock 규칙으로 동작하고 대화 API는 503을 반환합니다.
 
 - Swagger UI: <http://localhost:8000/docs>
 - ReDoc: <http://localhost:8000/redoc>
@@ -140,7 +145,7 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 - 일정 상세: `GET /api/v1/coaching/sessions/{session_id}/schedules/{schedule_id}`
 - 세션 삭제: `DELETE /api/v1/coaching/sessions/{session_id}`
 
-모든 상세 API는 부모 `session_id`도 함께 검증하므로 다른 세션의 데이터가 섞이지 않습니다.
+모든 상세 API는 세션 토큰과 부모 `session_id`를 함께 검증하므로 다른 세션의 데이터에 접근할 수 없습니다.
 
 #### 5. 대화 이어가기
 
@@ -173,8 +178,10 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 
 | 상태 코드 | 의미 |
 | --- | --- |
-| 404 | 세션 없음 |
+| 401 | `X-Session-Token` 헤더 없음 |
+| 404 | 세션 없음 또는 토큰 불일치 |
 | 422 | 빈 메시지 등 요청 형식 오류 |
+| 429 | 요청 제한 초과 (기본: 10분에 세션당 메시지 20회) |
 | 502 | Groq 호출 실패 |
 | 503 | `GROQ_API_KEY` 미설정 |
 
@@ -216,6 +223,7 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 
 ```bash
 cd backend
+pip install -r requirements-dev.txt
 pytest
 ```
 

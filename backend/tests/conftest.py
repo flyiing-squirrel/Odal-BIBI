@@ -1,6 +1,6 @@
 import pytest
 
-from app.api.routes import get_service
+from app.api.routes import get_service, settings
 from app.main import app
 from app.providers.mock_llm import MockLLMProvider
 from app.providers.official_schedule import MockOfficialScheduleAdapter, OfficialSiteScheduleProvider
@@ -17,3 +17,10 @@ def mock_coaching_service():
     app.dependency_overrides[get_service] = lambda: service
     yield
     app.dependency_overrides.pop(get_service, None)
+
+
+@pytest.fixture(autouse=True)
+def relaxed_rate_limits(monkeypatch):
+    """테스트마다 세션을 여러 개 만들므로 기본 제한을 넉넉히 둔다. 제한 테스트는 따로 값을 낮춘다."""
+    monkeypatch.setattr(settings, "max_sessions_per_window", 1000)
+    monkeypatch.setattr(settings, "max_messages_per_window", 1000)

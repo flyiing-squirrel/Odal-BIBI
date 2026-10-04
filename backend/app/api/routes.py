@@ -4,6 +4,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.security import hash_value, token_matches
 from app.db import get_db
 from app.providers.evidence_verifier import GroqEvidenceVerifier
 from app.providers.google_calendar import (
@@ -37,6 +38,7 @@ from app.schemas import (
     RecommendationListResponse,
     ScheduleListResponse,
     ScheduleResponse,
+    SessionCreatedResponse,
 )
 from app.security import (
     bearer_scheme,
@@ -101,6 +103,29 @@ def get_chat_service() -> ChatService:
 
 def not_found(error: LookupError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
+
+
+def too_many_requests(error: limits.RateLimitError) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(error))
+
+
+def authorize_session(
+    session_id: int,
+    x_session_token: str | None = Header(default=None, description="세션 생성 응답의 access_token"),
+    db: Session = Depends(get_db),
+) -> None:
+    """세션 소유자만 접근하게 한다. 토큰이 틀려도 404로 답해 다른 세션의 존재 여부를 숨긴다."""
+    if not x_session_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="X-Session-Token header required")
+    token_hash = db.scalar(select(CoachingSession.access_token_hash).where(CoachingSession.id == session_id))
+    if token_hash is None or not token_matches(x_session_token, token_hash):
+        raise not_found(LookupError("Coaching session not found"))
+
+
+def client_ip(request: Request) -> str:
+    # Vercel은 x-forwarded-for 맨 앞에 실제 클라이언트 IP를 넣는다
+    forwarded = request.headers.get("x-forwarded-for", "")
+    return forwarded.split(",")[0].strip() or (request.client.host if request.client else "unknown")
 
 
 @router.post(
@@ -216,6 +241,7 @@ def update_coaching_profile(
 
 @router.get(
     "/coaching/sessions/{session_id}",
+    dependencies=[Depends(authorize_session)],
     response_model=DashboardResponse,
     summary="대시보드 통합 조회",
     dependencies=[Depends(require_session_owner)],
@@ -233,6 +259,7 @@ def get_dashboard(
 
 @router.get(
     "/coaching/sessions/{session_id}/recommendations",
+    dependencies=[Depends(authorize_session)],
     response_model=RecommendationListResponse,
     summary="추천 자격증 목록",
     dependencies=[Depends(require_session_owner)],
@@ -252,6 +279,7 @@ def get_recommendations(
 
 @router.get(
     "/coaching/sessions/{session_id}/recommendations/{recommendation_id}",
+    dependencies=[Depends(authorize_session)],
     response_model=RecommendationDetail,
     summary="추천 자격증 상세",
     dependencies=[Depends(require_session_owner)],
@@ -270,6 +298,7 @@ def get_recommendation(
 
 @router.get(
     "/coaching/sessions/{session_id}/conversation",
+    dependencies=[Depends(authorize_session)],
     response_model=MessageListResponse,
     summary="대화 목록",
     dependencies=[Depends(require_session_owner)],
@@ -289,6 +318,7 @@ def get_conversation(
 
 @router.get(
     "/coaching/sessions/{session_id}/conversation/{message_id}",
+    dependencies=[Depends(authorize_session)],
     response_model=ConversationMessageResponse,
     summary="대화 메시지 상세",
     dependencies=[Depends(require_session_owner)],
@@ -307,6 +337,7 @@ def get_conversation_message(
 
 @router.get(
     "/coaching/sessions/{session_id}/schedules",
+    dependencies=[Depends(authorize_session)],
     response_model=ScheduleListResponse,
     summary="공식 자격증 일정 목록",
     dependencies=[Depends(require_session_owner)],
@@ -326,6 +357,7 @@ def get_schedules(
 
 @router.get(
     "/coaching/sessions/{session_id}/schedules/{schedule_id}",
+    dependencies=[Depends(authorize_session)],
     response_model=ScheduleResponse,
     summary="공식 자격증 일정 상세",
     dependencies=[Depends(require_session_owner)],
@@ -344,6 +376,7 @@ def get_schedule(
 
 @router.post(
     "/coaching/sessions/{session_id}/messages",
+    dependencies=[Depends(authorize_session)],
     response_model=ChatReplyResponse,
     status_code=status.HTTP_201_CREATED,
     summary="대화 이어가기 (요청 파악 → 검색 → 응답)",
@@ -365,9 +398,12 @@ def post_message(
         secret=settings.bff_shared_secret,
     )
     try:
+        limits.check_message(db, session_id, settings)
         result = chat.reply(db, session_id, payload.message)
     except LookupError as error:
         raise not_found(error) from error
+    except limits.RateLimitError as error:
+        raise too_many_requests(error) from error
     except ChatNotConfiguredError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
     except LLMError as error:
