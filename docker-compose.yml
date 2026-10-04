@@ -3,10 +3,11 @@ services:
     image: postgres:16
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-odal}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-odal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD를 .env에 설정하세요}
       POSTGRES_DB: ${POSTGRES_DB:-odal}
+    # 같은 PC에서만 접속 가능 (외부 노출 금지)
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -19,7 +20,7 @@ services:
     build: ./backend
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-odal}:${POSTGRES_PASSWORD:-odal}@db:5432/${POSTGRES_DB:-odal}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-odal}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-odal}
     ports:
       - "8000:8000"
     depends_on:

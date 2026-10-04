@@ -24,9 +24,10 @@ Odal-BIBI/
 ├─ backend/                                     FastAPI 백엔드
 │  ├─ app/        API·서비스·provider
 │  ├─ tests/
-│  ├─ requirements.txt, pyproject.toml
-│  └─ Dockerfile
-├─ docker-compose.yml                           db(PostgreSQL) + api
+│  ├─ requirements.txt, requirements-dev.txt, pyproject.toml
+│  ├─ vercel.json   Vercel 함수 설정 (Root Directory = backend)
+│  └─ Dockerfile    (선택) 컨테이너 실행용
+├─ docker-compose.yml                           (선택) db(PostgreSQL) + api
 └─ .env.example                                 프론트·백엔드 공용 환경변수 템플릿
 ```
 
@@ -43,7 +44,9 @@ LLM(Groq)과 웹 검색(Tavily)은 교체 가능한 provider 뒤에 분리되어
 - FastAPI REST API와 자동 OpenAPI 문서 (`/docs`)
 - Pydantic 입력/응답 스키마
 - 서비스 계층과 provider 계층 분리
-- PostgreSQL 기반 세션·추천·대화·일정 저장 (Docker Compose)
+- 세션·추천·대화·일정 저장: 로컬은 SQLite(설정 없이 바로), 배포는 PostgreSQL(Neon)
+- 세션별 접근 토큰(`X-Session-Token`)으로 소유자만 조회·대화 가능
+- LLM 비용 보호용 요청 제한: 세션당 메시지 수, IP당 세션 생성 수
 - Groq LLM 추천 + 세션 대화 이어가기 (요청 파악 → 웹 검색 → 근거 기반 응답)
 - 추천 자격증 목록 및 항목별 상세 조회
 - 대화 목록 및 메시지별 상세 조회
@@ -51,29 +54,50 @@ LLM(Groq)과 웹 검색(Tavily)은 교체 가능한 provider 뒤에 분리되어
 - 공식 사이트 연동용 `OfficialScheduleAdapter` 구조와 예시 mock adapter
 - 프론트엔드에서 바로 쓸 수 있는 통합 대시보드 응답
 
-### 백엔드 실행
+### 백엔드 실행 (Docker 없이)
+
+Python 3.11 이상만 있으면 됩니다. `DATABASE_URL`을 비워 두면 `backend/odal.db`(SQLite)가 자동으로 만들어집니다.
 
 ```bash
-cp .env.example .env    # GROQ_API_KEY, TAVILY_API_KEY 채우기 (비워둬도 실행됨)
-docker compose up --build
-```
-
-DB만 Docker로 띄우고 API는 로컬에서 자동 재시작으로 개발할 수도 있습니다. Python 3.11 이상을 권장합니다.
-
-```bash
-docker compose up -d db
+cp .env.example .env
 cd backend
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 uvicorn app.main:app --reload
 ```
+
+`.env`의 `GROQ_API_KEY`, `TAVILY_API_KEY`는 비워도 실행됩니다. 이 경우 추천은 mock 규칙으로 동작하고 대화 API는 503을 반환합니다.
 
 - Swagger UI: <http://localhost:8000/docs>
 - ReDoc: <http://localhost:8000/redoc>
 - Health check: <http://localhost:8000/health>
 
-PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데이터는 `pgdata` 볼륨에 유지됩니다. 테이블은 앱 시작 시 `create_all`로 생성되므로, 모델 컬럼이 바뀌면 `docker compose down -v`로 볼륨을 지우고 다시 띄워야 합니다.
+테이블은 앱 시작 시 `create_all`로 생성됩니다. 마이그레이션 도구가 없어 기존 테이블에 컬럼을 추가하지 못하므로, 모델 컬럼이 바뀌면 `backend/odal.db`를 지우고 다시 실행합니다.
+
+#### (선택) Docker Compose로 PostgreSQL과 함께 실행
+
+```bash
+docker compose up --build
+```
+
+`.env`에 `POSTGRES_PASSWORD`를 직접 정해야 실행됩니다. PostgreSQL은 `127.0.0.1:5432`에서만 열리며 데이터는 `pgdata` 볼륨에 유지됩니다. 모델 컬럼이 바뀌면 `docker compose down -v`로 볼륨을 지우고 다시 띄웁니다.
+
+### Vercel 배포 (백엔드)
+
+FastAPI 앱(`backend/app/main.py`의 `app`)을 Vercel이 자동으로 인식해 하나의 함수로 배포합니다.
+
+1. Vercel에서 **Add New → Project**로 이 GitHub 저장소를 가져옵니다.
+2. **Root Directory**를 `backend`로 지정합니다. Framework Preset은 FastAPI로 자동 인식됩니다.
+3. 프로젝트의 **Storage → Neon(Postgres)** 을 연결합니다. `DATABASE_URL`이 자동으로 들어갑니다. Vercel에서는 SQLite 파일이 유지되지 않으므로 Postgres가 필요합니다.
+4. **Settings → Environment Variables**에 추가합니다.
+   - `GROQ_API_KEY`, `TAVILY_API_KEY`
+   - `CORS_ORIGINS`: 프론트엔드 도메인 (예: `https://odal-bibi.vercel.app`). 여러 개는 쉼표로 구분
+   - `APP_ENV=production`
+   - (선택) `RATE_LIMIT_WINDOW_MINUTES`, `MAX_MESSAGES_PER_WINDOW`, `MAX_SESSIONS_PER_WINDOW`
+5. Deploy 후 `https://<배포 주소>/health`가 `{"status":"ok"}`를 반환하는지, `/docs`가 열리는지 확인합니다.
+
+대화 요청은 LLM·검색을 여러 번 호출하므로 `vercel.json`에서 함수 최대 실행 시간을 60초로 늘려 두었습니다. 테이블은 첫 요청 시(lifespan) 자동 생성됩니다.
 
 ### API 키 관리
 
@@ -84,7 +108,7 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 
 - Groq·Tavily 키는 각자 발급받아 자신의 `.env`에 넣습니다. 공용 키가 필요하면 비밀번호 관리자(1Password, Bitwarden 등) 공유 금고로 전달하고 채팅에 붙여넣지 않습니다.
 - 새 환경변수가 생기면 `.env.example`에 이름만 추가합니다.
-- 배포 시에는 배포 서비스의 환경변수 설정이나 GitHub Secrets를 사용합니다. `.env`는 루트에 있어 백엔드 Docker 이미지(`backend/` 빌드)에 포함되지 않습니다.
+- 배포 시에는 Vercel 프로젝트의 Environment Variables를 사용합니다. `.env`는 저장소 루트에 있어 `backend/`만 올라가는 Vercel·Docker 빌드에 포함되지 않습니다.
 - 키가 커밋·push 되었다면 커밋 삭제만으로는 부족합니다. 즉시 해당 콘솔에서 키를 폐기하고 재발급합니다.
 
 ### API 흐름
@@ -106,6 +130,14 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 
 응답은 대시보드 첫 화면에 필요한 데이터를 한 번에 포함합니다. 각 항목의 `id`로 상세 화면을 요청할 수 있습니다.
 
+응답의 `access_token`은 **이 응답에서만 한 번** 내려옵니다. 프론트엔드는 이를 저장해 두고, 이후 `/coaching/sessions/{session_id}/...` 요청마다 헤더로 보내야 합니다. 서버에는 토큰의 해시만 저장됩니다.
+
+```
+X-Session-Token: <access_token>
+```
+
+토큰이 없으면 401, 틀리거나 다른 세션의 토큰이면 404를 반환합니다. 같은 IP에서 짧은 시간에 세션을 너무 많이 만들면 429를 반환합니다.
+
 #### 2. 대시보드 재조회
 
 `GET /api/v1/coaching/sessions/{session_id}`
@@ -119,7 +151,7 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 - 일정 목록: `GET /api/v1/coaching/sessions/{session_id}/schedules`
 - 일정 상세: `GET /api/v1/coaching/sessions/{session_id}/schedules/{schedule_id}`
 
-모든 상세 API는 부모 `session_id`도 함께 검증하므로 다른 세션의 데이터가 섞이지 않습니다.
+모든 상세 API는 세션 토큰과 부모 `session_id`를 함께 검증하므로 다른 세션의 데이터에 접근할 수 없습니다.
 
 #### 4. 대화 이어가기
 
@@ -132,6 +164,7 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 1. **요청 파악**: Groq가 의도(`recommend`·`schedule`·`study_path`·`general`)와 검색어를 JSON으로 추출합니다. 세션 프로필과 추천 결과를 함께 넘기므로 "1순위" 같은 지시어도 해석합니다.
 2. **검색**: Tavily로 검색합니다. 일정 문의는 공식 기관 도메인(q-net, dataq 등)을 먼저 검색하고, 결과가 없으면 일반 검색으로 넘어갑니다.
 3. **응답**: 검색 결과에 있는 사실만 `[1]` 형태로 출처를 붙여 답하고, 확인되지 않은 일정·비용은 "미확인"으로 표시합니다.
+4. **근거 검사**: 금액·날짜·URL이 들어간 줄에 유효한 출처 번호(`[1]`~`[검색 결과 수]`)가 없거나 범위를 벗어난 번호가 있으면 한 번 다시 쓰게 하고, 그래도 남으면 해당 줄을 지웁니다. 검색 결과가 없으면 이런 표현 자체를 허용하지 않습니다. 출처 번호가 가리키는 검색 결과에 그 사실이 실제로 있는지까지는 확인하지 않습니다.
 
 응답 예시:
 
@@ -151,8 +184,10 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 
 | 상태 코드 | 의미 |
 | --- | --- |
-| 404 | 세션 없음 |
+| 401 | `X-Session-Token` 헤더 없음 |
+| 404 | 세션 없음 또는 토큰 불일치 |
 | 422 | 빈 메시지 등 요청 형식 오류 |
+| 429 | 요청 제한 초과 (기본: 10분에 세션당 메시지 20회) |
 | 502 | Groq 호출 실패 |
 | 503 | `GROQ_API_KEY` 미설정 |
 
@@ -194,9 +229,10 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 
 ```bash
 cd backend
+pip install -r requirements-dev.txt
 pytest
 ```
 
 ### 다음 단계 제안
 
-운영 환경에서는 사용자 인증 및 세션 소유권, 일정 캐시/만료 정책, provider 호출 실패 상태(`pending`, `failed`), 비동기 작업 큐, 실제 자격증 master data 관리를 추가할 수 있습니다.
+운영 환경에서는 계정 기반 로그인(현재는 세션 토큰 방식), DB 마이그레이션(Alembic), 일정 캐시/만료 정책, provider 호출 실패 상태(`pending`, `failed`), 비동기 작업 큐, 실제 자격증 master data 관리를 추가할 수 있습니다.

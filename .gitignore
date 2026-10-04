@@ -37,3 +37,6 @@ dist/
 !.env.example
 .DS_Store
 *.pem
+
+# 로컬 SQLite DB (DATABASE_URL 미설정 시)
+odal.db

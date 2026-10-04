@@ -16,6 +16,7 @@ dependencies = [
     "psycopg[binary]>=3.2,<4.0",
     "groq>=0.11,<2.0",
     "tavily-python>=0.5,<1.0",
+    "httpx>=0.27,<1.0",
 ]
 
 [project.optional-dependencies]
@@ -24,6 +25,10 @@ dev = [
     "pytest>=8.0,<9.0",
     "ruff>=0.6,<1.0",
 ]
+
+# app/과 tests/가 나란히 있어 setuptools 자동 탐색이 실패하지 않도록 패키지를 지정한다
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
