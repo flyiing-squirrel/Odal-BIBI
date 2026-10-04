@@ -65,6 +65,7 @@ class CoachingService:
     def create_session(
         self,
         db: Session,
+        session_token_hash: str,
         desired_job: str,
         major_experience: str | None,
         owned_certifications: list[str],
@@ -75,6 +76,7 @@ class CoachingService:
             major_experience=major_experience,
             owned_certifications=owned_certifications,
             target_acquisition_period=target_acquisition_period,
+            session_token_hash=session_token_hash,
         )
         db.add(session)
         db.flush()
@@ -138,6 +140,11 @@ class CoachingService:
 
         db.commit()
         return self.get_dashboard(db, session.id)
+
+    def delete_session(self, db: Session, session_id: int) -> None:
+        session = self._get_session(db, session_id)
+        db.delete(session)
+        db.commit()
 
     def get_dashboard(self, db: Session, session_id: int) -> DashboardResponse:
         session = self._get_session(db, session_id)

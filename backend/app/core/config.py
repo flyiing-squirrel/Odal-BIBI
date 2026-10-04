@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
     tavily_api_key: str = ""
+    bff_shared_secret: str = ""
+    session_creation_limit_per_hour: int = Field(default=5, ge=1, le=100)
+    chat_messages_per_hour: int = Field(default=30, ge=1, le=1000)
+    rate_limit_window_seconds: int = Field(default=3600, ge=60, le=86400)
     db_pool_size: int = Field(default=1, ge=1, le=10)
     db_max_overflow: int = Field(default=0, ge=0, le=10)
     db_pool_timeout: float = Field(default=5, gt=0, le=60)

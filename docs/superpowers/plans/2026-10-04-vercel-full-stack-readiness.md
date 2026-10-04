@@ -49,19 +49,19 @@
 
 **Files:** `backend/app/models.py`, `backend/app/schemas.py`, `backend/app/core/config.py`, 신규 `backend/app/security.py`, `backend/app/api/routes.py`, 신규 `app/api/backend/[...path]/route.ts`, 신규 `lib/api.ts`, `.env.example`.
 
-- [ ] 세션 생성 때 256-bit 이상 난수 토큰을 만들고 SHA-256 해시만 세션 DB 레코드에 저장한다. 생성 응답 타입 `CreateSessionResponse(DashboardResponse)`는 응답 직후 한 번만 원문 `session_token: str`을 포함한다.
-- [ ] 모든 세션 API에 `require_bff_secret(x_bff_secret: str | None = Header(default=None, alias="X-BFF-Secret")) -> None`을 적용한다. 세션 생성은 BFF 인증만 요구하고, 세션 ID가 있는 읽기·쓰기·삭제 경로에는 추가로 `require_session_owner(session_id: int, credentials: HTTPAuthorizationCredentials, db: Session) -> None`을 적용한다.
+- [x] 세션 생성 때 256-bit 이상 난수 토큰을 만들고 SHA-256 해시만 세션 DB 레코드에 저장한다. 생성 응답 타입 `CreateSessionResponse(DashboardResponse)`는 응답 직후 한 번만 원문 `session_token: str`을 포함한다.
+- [x] 모든 세션 API에 `require_bff_secret(x_bff_secret: str | None = Header(default=None, alias="X-BFF-Secret")) -> None`을 적용한다. 세션 생성은 BFF 인증만 요구하고, 세션 ID가 있는 읽기·쓰기·삭제 경로에는 추가로 `require_session_owner(session_id: int, credentials: HTTPAuthorizationCredentials, db: Session) -> None`을 적용한다.
   - 토큰은 세션 ID와 함께 확인하고, DB 해시와 비교할 때 상수 시간 비교를 사용한다.
-- [ ] 소유 세션에 `DELETE /api/v1/coaching/sessions/{session_id}`를 추가해 하위 메시지·추천·일정과 세션을 삭제한다.
-- [ ] Next.js catch-all 프록시는 `GET`, `POST`, `PATCH`, `DELETE`만 허용하고, 고정된 `BACKEND_API_URL`로 전달한다. `BFF_SHARED_SECRET`를 서버 헤더로 넣고 세션 쿠키가 있을 때만 Bearer 토큰으로 전달한다.
-- [ ] 생성 응답에서는 `session_token`을 JSON에서 제거하고 `HttpOnly; SameSite=Lax; Secure(운영); Path=/api` 쿠키로 설정한다. `Path=/api`는 BFF와 Google OAuth callback 모두에 쿠키가 전달되도록 한다. 로컬 HTTP 개발에서는 `Secure`를 끈다. 세션 삭제 응답은 쿠키를 만료시킨다.
-- [ ] 프록시의 변경 요청은 허용된 `Origin`을 검사한다. 세션 생성은 ingress client address의 해시 기준으로, 채팅은 session ID 기준으로 PostgreSQL 공유 상태 요청 제한을 적용하고 임계값은 설정값으로 둔다. 원 IP는 rate-limit 저장소나 로그에 남기지 않는다.
-- [ ] API 키·BFF 비밀값·세션 토큰을 로그에 쓰지 않는다. 제한되지 않은 임의 URL 프록시가 되지 않도록 경로와 메서드를 제한한다.
-- [ ] 변경을 `security: isolate browser sessions behind BFF` 메시지로 커밋한다.
+- [x] 소유 세션에 `DELETE /api/v1/coaching/sessions/{session_id}`를 추가해 하위 메시지·추천·일정과 세션을 삭제한다.
+- [x] Next.js catch-all 프록시는 `GET`, `POST`, `PATCH`, `DELETE`만 허용하고, 고정된 `BACKEND_API_URL`로 전달한다. `BFF_SHARED_SECRET`를 서버 헤더로 넣고 세션 쿠키가 있을 때만 Bearer 토큰으로 전달한다.
+- [x] 생성 응답에서는 `session_token`을 JSON에서 제거하고 `HttpOnly; SameSite=Lax; Secure(운영); Path=/api` 쿠키로 설정한다. `Path=/api`는 BFF와 Google OAuth callback 모두에 쿠키가 전달되도록 한다. 로컬 HTTP 개발에서는 `Secure`를 끈다. 세션 삭제 응답은 쿠키를 만료시킨다.
+- [x] 프록시의 변경 요청은 허용된 `Origin`을 검사한다. 세션 생성은 ingress client address의 해시 기준으로, 채팅은 session ID 기준으로 PostgreSQL 공유 상태 요청 제한을 적용하고 임계값은 설정값으로 둔다. 원 IP는 rate-limit 저장소나 로그에 남기지 않는다.
+- [x] API 키·BFF 비밀값·세션 토큰을 로그에 쓰지 않는다. 제한되지 않은 임의 URL 프록시가 되지 않도록 경로와 메서드를 제한한다.
+- [x] 변경을 `security: isolate browser sessions behind BFF` 메시지로 커밋한다.
 
 **Interfaces:** 프런트엔드 브라우저는 `/api/backend/...`만 호출한다. FastAPI는 `X-BFF-Secret`와 소유 세션 경로에 대한 `Authorization: Bearer <session-token>`을 모두 확인한다. 쿠키 토큰 원문은 프런트엔드 JavaScript에서 읽을 수 없어야 한다.
 
-**Verification:** `npm run lint`, `npm run build`, `python -m compileall -q backend/app`, `ruff check backend`, `git diff --check`를 실행한다. 응답 스키마·프록시 코드를 정적으로 확인해 토큰 제거, HttpOnly/Secure 속성, 허용된 메서드, Origin 검사가 모든 변경 경로에 적용되는지 검토한다.
+**검증:** `npm run lint`, `npm run build`, `uv run python -m compileall -q app`, `uv run ruff check --ignore B008 app/api/routes.py app/core/config.py app/models.py app/schemas.py app/services/coaching.py app/security.py alembic`(backend/ 기준), `uv lock --check`, `uv run alembic upgrade --sql head`, `git diff --check`를 확인한다. FastAPI의 `Depends()` 기본값 관례 때문에 B008만 제외했고, 저장소 전체의 기존 Ruff 항목은 Task 1에 기록했다. 토큰 제거, HttpOnly/Secure 쿠키, 허용 메서드, Origin 검사도 정적으로 확인했다. 실제 DB 공급자가 설정되지 않아 온라인 migration은 적용하지 않았다.
 
 ## Task 3: 프로필/API 계약 정리와 대시보드 데이터 연결
 

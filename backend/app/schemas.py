@@ -111,6 +111,10 @@ class DashboardResponse(BaseModel):
     schedules: list[ScheduleResponse]
 
 
+class CreateSessionResponse(DashboardResponse):
+    session_token: str
+
+
 class MessageListResponse(BaseModel):
     session_id: int
     items: list[ConversationMessageResponse]

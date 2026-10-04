@@ -1,13 +1,13 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Certification(Base):
@@ -34,6 +34,7 @@ class CoachingSession(Base):
     major_experience: Mapped[str | None] = mapped_column(Text, nullable=True)
     owned_certifications: Mapped[list[str]] = mapped_column(JSON, default=list)
     target_acquisition_period: Mapped[str] = mapped_column(String(100))
+    session_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     recommendations: Mapped[list["CertificationRecommendation"]] = relationship(
@@ -106,4 +107,12 @@ class CertificationSchedule(Base):
     session: Mapped[CoachingSession] = relationship(back_populates="schedules")
     recommendation: Mapped[CertificationRecommendation | None] = relationship(back_populates="schedules")
     certification: Mapped[Certification] = relationship(back_populates="schedules")
+
+
+class RequestRateLimit(Base):
+    __tablename__ = "request_rate_limits"
+
+    key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    request_count: Mapped[int] = mapped_column(Integer)
 
