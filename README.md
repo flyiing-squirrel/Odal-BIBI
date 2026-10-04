@@ -1,6 +1,6 @@
 # Odal BIBI
 
-자격증 준비를 위한 대시보드 UI와 FastAPI 백엔드를 담은 저장소입니다. 현재 웹 UI 시안은 추천, 일정, 프로필, 채팅 네 영역만 제공합니다.
+자격증 준비를 위한 대시보드 UI와 FastAPI 백엔드를 담은 저장소입니다. 웹 UI는 추천, 일정, 프로필, 채팅 네 영역에서 비공개 브라우저 세션 API를 사용합니다.
 
 ## 대시보드 UI
 
@@ -11,10 +11,10 @@ npm install
 npm run dev
 ```
 
-- 추천 카드와 비교 후보는 화면 예시 데이터입니다.
-- 공식 시험 일정은 UI에서 연결 전 상태로 표시하며 임의의 날짜를 넣지 않습니다.
-- 프로필과 채팅 내역은 현재 브라우저의 `localStorage`에 저장됩니다.
-- 채팅은 시연용 응답을 사용하며, 현재 UI는 외부 AI/API를 호출하지 않습니다.
+- 프로필 저장 후 API가 반환한 추천·대화 데이터를 표시합니다.
+- 브라우저에는 비밀이 아닌 `session_id`만 `localStorage`에 저장하고, 프로필·대화 내용은 API에서 다시 불러옵니다.
+- 세션 token은 same-origin Next.js 프록시가 HttpOnly 쿠키로 관리하며 JavaScript에서 읽을 수 없습니다.
+- 확인된 공식 일정이 없으면 일정 탭에 확인 대기 상태를 표시합니다.
 
 ## 폴더 구조
 
@@ -34,9 +34,9 @@ Odal-BIBI/
 
 백엔드 코드는 `backend/`에 있으며, 아래 경로는 모두 `backend/` 기준입니다. `.env`는 저장소 루트에 하나만 둡니다.
 
-희망직무, 전공 관련 경험, 보유 자격증, 목표 취득 시기를 입력받아 자격증 추천 결과·대화 내용·공식 자격증 일정을 대시보드에서 소비할 수 있는 형태로 제공합니다.
+관심 분야, 주간 학습 시간, 선호 학습 방식, 월 예산을 저장하고 추천·대화·공식 일정 정보를 대시보드에서 소비할 수 있는 형태로 제공합니다. 이전 버전의 세션 입력 필드는 과거 데이터 호환을 위해 nullable로 유지합니다.
 
-LLM(Groq)과 웹 검색(Tavily)은 교체 가능한 provider 뒤에 분리되어 있습니다. API key가 비어 있으면 결정론적인 mock 추천으로 동작하므로 key 없이도 로컬 개발이 가능합니다. 공식 일정은 아직 mock adapter입니다.
+LLM(Groq)과 웹 검색(Tavily)은 교체 가능한 provider 뒤에 분리되어 있습니다. API key가 비어 있으면 추천은 결정론적인 기본 provider를 사용할 수 있고, 채팅은 `GROQ_API_KEY`가 없을 때 503을 반환합니다. 공식 일정 provider는 실제로 검증한 자료가 준비될 때까지 빈 목록을 반환합니다. 날짜를 임의로 만들어 저장하지 않습니다.
 
 ### 주요 기능
 
@@ -48,13 +48,15 @@ LLM(Groq)과 웹 검색(Tavily)은 교체 가능한 provider 뒤에 분리되어
 - 추천 자격증 목록 및 항목별 상세 조회
 - 대화 목록 및 메시지별 상세 조회
 - 공식 일정 목록 및 일정별 상세 조회
-- 공식 사이트 연동용 `OfficialScheduleAdapter` 구조와 예시 mock adapter
+- 비공개 세션 프로필 수정과 추천 재생성
+- 세션별 token 소유권 검사와 세션 삭제
+- 공식 사이트 연동용 `OfficialScheduleAdapter` 구조와 미설정 상태의 빈 adapter
 - 프론트엔드에서 바로 쓸 수 있는 통합 대시보드 응답
 
 ### 백엔드 실행
 
 ```bash
-cp .env.example .env    # GROQ_API_KEY, TAVILY_API_KEY 채우기 (비워둬도 실행됨)
+cp .env.example .env    # BFF_SHARED_SECRET와 보유한 GROQ_API_KEY, TAVILY_API_KEY 설정
 docker compose up --build
 ```
 
@@ -83,12 +85,15 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 | `.env.example` | 커밋함 | 키 **이름**만 있는 템플릿 (값은 `""`) |
 | `.env` | 커밋 안 함 (`.gitignore`) | 실제 키 **값**, 각자 PC에만 둠 |
 
-- Groq·Tavily 키는 각자 발급받아 자신의 `.env`에 넣습니다. 공용 키가 필요하면 비밀번호 관리자(1Password, Bitwarden 등) 공유 금고로 전달하고 채팅에 붙여넣지 않습니다.
+- Groq·Tavily 키는 자신의 `.env`에만 넣고 프런트엔드 코드나 `NEXT_PUBLIC_` 변수로 노출하지 않습니다. Vercel 배포 시에는 `/backend` 프로젝트의 서버 환경변수로 설정합니다.
+- Next.js와 FastAPI는 동일한 `BFF_SHARED_SECRET` 값을 사용해야 합니다. 최소 32바이트의 무작위 값을 사용합니다. 이 값은 두 서버 런타임에서만 보관합니다.
 - 새 환경변수가 생기면 `.env.example`에 이름만 추가합니다.
 - 배포 시에는 배포 서비스의 환경변수 설정이나 GitHub Secrets를 사용합니다. `.env`는 루트에 있어 백엔드 Docker 이미지(`backend/` 빌드)에 포함되지 않습니다.
 - 키가 커밋·push 되었다면 커밋 삭제만으로는 부족합니다. 즉시 해당 콘솔에서 키를 폐기하고 재발급합니다.
 
 ### API 흐름
+
+브라우저는 `/api/backend/...`만 호출합니다. Next.js 프록시는 고정된 `BACKEND_API_URL`로 요청을 보내며 `X-BFF-Secret`과 세션 Bearer token을 서버 간에 전달합니다. 백엔드 직접 호출은 BFF secret이 필요하고, 세션별 읽기·쓰기에는 세션 소유권 token도 필요합니다.
 
 #### 1. 코칭 세션 생성
 
@@ -98,20 +103,30 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 
 ```json
 {
-  "desired_job": "백엔드 개발자",
-  "major_experience": "학교 프로젝트에서 REST API를 구현했습니다.",
-  "owned_certifications": ["컴퓨터활용능력 1급"],
-  "target_acquisition_period": "2026년 하반기"
+  "interest_area": "데이터 분석",
+  "weekly_study_hours": "주 6시간",
+  "learning_style": "문제 풀이 중심",
+  "monthly_budget": "월 5만 원 이내"
 }
 ```
 
-응답은 대시보드 첫 화면에 필요한 데이터를 한 번에 포함합니다. 각 항목의 `id`로 상세 화면을 요청할 수 있습니다.
+응답은 대시보드 첫 화면에 필요한 데이터와 `session_id`를 포함합니다. 백엔드 응답의 원문 `session_token`은 Next.js 프록시가 JSON에서 제거하고 `HttpOnly; SameSite=Lax; Path=/api` 쿠키로 설정합니다.
 
-#### 2. 대시보드 재조회
+#### 2. 프로필 수정 및 추천 갱신
+
+`PATCH /api/v1/coaching/sessions/{session_id}/profile`
+
+```json
+{ "weekly_study_hours": "주 8시간", "monthly_budget": "무료 자료 우선" }
+```
+
+보낸 필드만 변경하고, 업데이트된 프로필·추천·대화·일정 묶음을 반환합니다. 첫 프로필 저장은 세션 생성 API를 사용하고 이후 저장은 이 PATCH API를 사용합니다.
+
+#### 3. 대시보드 재조회
 
 `GET /api/v1/coaching/sessions/{session_id}`
 
-#### 3. 카드 클릭용 상세 조회
+#### 4. 카드 클릭용 상세 조회
 
 - 추천 목록: `GET /api/v1/coaching/sessions/{session_id}/recommendations`
 - 추천 상세: `GET /api/v1/coaching/sessions/{session_id}/recommendations/{recommendation_id}`
@@ -119,10 +134,11 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 - 대화 상세: `GET /api/v1/coaching/sessions/{session_id}/conversation/{message_id}`
 - 일정 목록: `GET /api/v1/coaching/sessions/{session_id}/schedules`
 - 일정 상세: `GET /api/v1/coaching/sessions/{session_id}/schedules/{schedule_id}`
+- 세션 삭제: `DELETE /api/v1/coaching/sessions/{session_id}`
 
 모든 상세 API는 부모 `session_id`도 함께 검증하므로 다른 세션의 데이터가 섞이지 않습니다.
 
-#### 4. 대화 이어가기
+#### 5. 대화 이어가기
 
 `POST /api/v1/coaching/sessions/{session_id}/messages`
 
@@ -181,12 +197,12 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 4. 필요하면 캐시·재시도·rate limit을 adapter 내부에 추가합니다.
 5. `OfficialSiteScheduleProvider(YourOfficialAdapter())`로 교체합니다.
 
-기관별 사이트 구조가 달라 공통 provider에는 크롤링 코드를 넣지 않았습니다. 현재 mock 일정도 실제 연동과 동일한 응답 형태를 사용합니다.
+기관별 사이트 구조가 달라 공통 provider에는 크롤링 코드를 넣지 않았습니다. 검증 adapter를 설정하기 전까지 활성 provider는 빈 일정 목록을 반환합니다. `MockOfficialScheduleAdapter`는 예시용이며 실제 앱에는 연결하지 않습니다.
 
 ### 데이터 구조
 
 - `certifications`: 자격증 master/catalog
-- `coaching_sessions`: 사용자 입력과 생성 시각
+- `coaching_sessions`: 프로필 입력과 생성 시각 (기존 필드는 nullable 호환 필드)
 - `certification_recommendations`: 세션별 추천 결과와 매칭 점수
 - `conversation_messages`: 사용자 입력과 LLM 대화, assistant 답변의 출처(`sources`)
 - `certification_schedules`: 추천 자격증별 시험·접수·합격 발표 일정과 원문 링크
@@ -200,4 +216,4 @@ pytest
 
 ### 다음 단계 제안
 
-운영 환경에서는 사용자 인증 및 세션 소유권, 일정 캐시/만료 정책, provider 호출 실패 상태(`pending`, `failed`), 비동기 작업 큐, 실제 자격증 master data 관리를 추가할 수 있습니다.
+추가 운영 작업으로는 계정 간 로그인·기기 동기화, 일정 캐시/만료 정책, provider 호출 실패 상태(`pending`, `failed`), 비동기 작업 큐, 실제 자격증 master data 관리를 고려할 수 있습니다.

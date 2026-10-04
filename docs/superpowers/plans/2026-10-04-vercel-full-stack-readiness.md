@@ -65,19 +65,21 @@
 
 ## Task 3: 프로필/API 계약 정리와 대시보드 데이터 연결
 
-**Files:** `backend/app/models.py`, `backend/app/schemas.py`, `backend/app/providers/base.py`, `backend/app/services/coaching.py`, `backend/app/api/routes.py`, 새 migration, `app/page.tsx`, `lib/api.ts`, `README.md`.
+**Files:** `backend/app/models.py`, `backend/app/schemas.py`, `backend/app/core/config.py`, `backend/app/providers/base.py`, `backend/app/providers/groq_llm.py`, `backend/app/providers/mock_llm.py`, `backend/app/providers/official_schedule.py`, `backend/app/services/coaching.py`, `backend/app/services/chat.py`, `backend/app/api/routes.py`, `backend/app/security.py`, 새 migration, `app/page.tsx`, `app/globals.css`, `lib/api.ts`, `lib/use-coaching-session.ts`, `.env.example`, `README.md`.
 
-- [ ] UI가 이미 수집하는 `career`, `hours`, `learningStyle`, `budget`에 대응해 `interest_area: str`, `weekly_study_hours: str`, `learning_style: str`, `monthly_budget: str` 백엔드 필드를 추가한다. 이 값을 `desired_job`, 경험, 보유 자격증, 목표 취득 시기로 추정 변환하지 않는다. 기존 열은 과거 데이터 호환을 위해 유지하되 새 요청의 필수값에서 제외하고 nullable로 전환한다. 새 프로필 필드도 기존 행에 임의 값으로 채우지 않는다.
-- [ ] `CoachInput`과 recommendation prompt에 네 필드를 전달하고 DB에 저장한다. 프로필 갱신 계약은 `PATCH /api/v1/coaching/sessions/{session_id}/profile` 및 부분 갱신 schema `ProfileUpdate`로 정의한다.
-- [ ] 첫 프로필 저장은 `POST /coaching/sessions`로 세션을 만들고, 이후 저장은 `PATCH .../profile`로 처리한다. 프로필 갱신 후 반환하는 대시보드 데이터는 갱신된 프로필과 추천을 함께 반영한다.
-- [ ] 화면 진입 시 저장된 비밀 아닌 `session_id`만 사용해 dashboard를 재조회한다. 프로필과 대화 내용 전체를 localStorage에서 읽거나 쓰지 않는다. 세션 토큰은 쿠키에만 둔다.
-- [ ] 추천·일정·채팅 상태를 `lib/api.ts`의 타입 지정된 same-origin 요청 함수로 연결하고, `getDemoReply`, 시연용 추천 데이터와 “화면 예시 데이터” 표시를 제거한다. 빈 상태·로딩·오류 상태를 제공한다.
-- [ ] 공식 일정 provider가 확인한 레코드가 없으면 일정 목록은 비워 두고 확인 대기 UI를 유지한다.
-- [ ] 변경을 `feat: connect dashboard to private coaching sessions` 메시지로 커밋한다.
+- [x] UI가 이미 수집하는 `career`, `hours`, `learningStyle`, `budget`에 대응해 `interest_area: str`, `weekly_study_hours: str`, `learning_style: str`, `monthly_budget: str` 백엔드 필드를 추가한다. 이 값을 `desired_job`, 경험, 보유 자격증, 목표 취득 시기로 추정 변환하지 않는다. 기존 열은 과거 데이터 호환을 위해 유지하되 새 요청의 필수값에서 제외하고 nullable로 전환한다. 새 프로필 필드도 기존 행에 임의 값으로 채우지 않는다.
+- [x] `CoachInput`과 recommendation prompt에 네 필드를 전달하고 DB에 저장한다. 프로필 갱신 계약은 `PATCH /api/v1/coaching/sessions/{session_id}/profile` 및 부분 갱신 schema `ProfileUpdate`로 정의한다.
+- [x] 첫 프로필 저장은 `POST /coaching/sessions`로 세션을 만들고, 이후 저장은 `PATCH .../profile`로 처리한다. 프로필 갱신 후 반환하는 대시보드 데이터는 갱신된 프로필과 추천을 함께 반영한다.
+- [x] 프로필 변경은 새 추천을 생성하므로 세션별 고정 구간 요청 제한을 적용하고, 세션 삭제 시 해당 제한 카운터도 정리한다.
+- [x] 화면 진입 시 저장된 비밀 아닌 `session_id`만 사용해 dashboard를 재조회한다. 프로필과 대화 내용 전체를 localStorage에서 읽거나 쓰지 않는다. 세션 토큰은 쿠키에만 둔다.
+- [x] 추천·일정·채팅 상태를 `lib/api.ts`의 타입 지정된 same-origin 요청 함수로 연결하고, `getDemoReply`, 시연용 추천 데이터와 “화면 예시 데이터” 표시를 제거한다. 빈 상태·로딩·오류 상태를 제공한다.
+- [x] 공식 일정 provider가 확인한 레코드가 없으면 일정 목록은 비워 두고 확인 대기 UI를 유지한다.
+- [x] 기존 DB에 저장된 `Mock Official Schedule Adapter`의 가짜 일정 행은 migration에서 삭제한다. 모의 일정은 복구하지 않는다.
+- [x] 변경을 `feat: connect dashboard to private coaching sessions` 메시지로 커밋한다.
 
 **Interfaces:** `ProfileUpdate`는 네 UI 프로필 필드의 선택적 부분 갱신을 받는다. `PATCH .../profile`은 업데이트된 `DashboardResponse`를 반환한다. 브라우저 API 모듈은 `createSession(input): Promise<DashboardResponse>`, `getDashboard(sessionId): Promise<DashboardResponse>`, `updateProfile(sessionId, patch): Promise<DashboardResponse>`, `sendMessage(sessionId, message): Promise<ChatReplyResponse>`를 export한다.
 
-**Verification:** `npm run lint`, `npm run build`, `python -m compileall -q backend/app`, `ruff check backend`, `git diff --check`. 필드 이름·타입을 `CoachInput`→ORM→추천 프롬프트→응답→React 폼 경로로 대조하고, localStorage 사용이 `session_id` 외에 남지 않았는지 검색한다.
+**Verification:** `npm run lint`, `npm run build`, `uv run python -m compileall -q app`, `uv run ruff check --ignore B008`를 변경한 백엔드 경로에 실행하고, `uv lock --check`, `uv run alembic upgrade --sql head`, `git diff --check`를 확인한다. 필드 이름·타입을 `CoachInput`→ORM→추천 프롬프트→응답→React 폼 경로로 대조하고, localStorage에는 session ID만 쓰며 구형 프로필·대화 키를 제거하는지 검색한다. FastAPI의 `Depends()` 기본값 관례 때문에 B008만 제외하고 전체 테스트는 실행하지 않는다. DB 접속 설정이 없어 온라인 migration은 적용하지 않는다.
 
 ## Task 4: 구조화된 채팅과 fail-closed 근거 검사
 

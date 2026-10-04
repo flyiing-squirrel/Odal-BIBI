@@ -130,5 +130,8 @@ def enforce_rate_limit(
 def clear_session_rate_limit(db: Session, session_id: int) -> None:
     secret = get_settings().bff_shared_secret
     if secret:
-        key_hash = rate_limit_key_hash("chat", str(session_id), secret)
-        db.execute(delete(RequestRateLimit).where(RequestRateLimit.key_hash == key_hash))
+        key_hashes = [
+            rate_limit_key_hash(scope, str(session_id), secret)
+            for scope in ("chat", "profile-update")
+        ]
+        db.execute(delete(RequestRateLimit).where(RequestRateLimit.key_hash.in_(key_hashes)))

@@ -8,7 +8,12 @@ from app.models import (
     CoachingSession,
     ConversationMessage,
 )
-from app.providers.base import CoachingPrompt, LLMProvider, ScheduleProvider
+from app.providers.base import (
+    CoachingPrompt,
+    LLMProvider,
+    LLMRecommendationResult,
+    ScheduleProvider,
+)
 from app.schemas import DashboardResponse
 
 CATALOG = [
@@ -66,12 +71,21 @@ class CoachingService:
         self,
         db: Session,
         session_token_hash: str,
-        desired_job: str,
-        major_experience: str | None,
-        owned_certifications: list[str],
-        target_acquisition_period: str,
+        *,
+        interest_area: str,
+        weekly_study_hours: str | None = None,
+        learning_style: str | None = None,
+        monthly_budget: str | None = None,
+        desired_job: str | None = None,
+        major_experience: str | None = None,
+        owned_certifications: list[str] | None = None,
+        target_acquisition_period: str | None = None,
     ) -> DashboardResponse:
         session = CoachingSession(
+            interest_area=interest_area,
+            weekly_study_hours=weekly_study_hours,
+            learning_style=learning_style,
+            monthly_budget=monthly_budget,
             desired_job=desired_job,
             major_experience=major_experience,
             owned_certifications=owned_certifications,
@@ -81,27 +95,56 @@ class CoachingService:
         db.add(session)
         db.flush()
 
-        prompt = CoachingPrompt(
-            desired_job=desired_job,
-            major_experience=major_experience,
-            owned_certifications=owned_certifications,
-            target_acquisition_period=target_acquisition_period,
-        )
-        result = self.llm_provider.recommend(prompt)
+        result = self.llm_provider.recommend(self._prompt_for(session))
         db.add(
             ConversationMessage(
                 session_id=session.id,
                 role="user",
-                content=(
-                    f"희망직무: {desired_job}\n"
-                    f"전공 관련 경험: {major_experience or '입력 없음'}\n"
-                    f"보유 자격증: {', '.join(owned_certifications) or '없음'}\n"
-                    f"목표 취득 시기: {target_acquisition_period}"
-                ),
+                content=self._profile_summary(session),
             )
         )
         db.add(ConversationMessage(session_id=session.id, role="assistant", content=result.assistant_summary))
+        self._store_recommendations(db, session, result)
 
+        db.commit()
+        return self.get_dashboard(db, session.id)
+
+    def update_profile(
+        self, db: Session, session_id: int, changes: dict[str, str | None]
+    ) -> DashboardResponse:
+        if not changes:
+            raise ValueError("At least one profile field is required")
+
+        session = self._get_session(db, session_id)
+        for field, value in changes.items():
+            setattr(session, field, value)
+
+        result = self.llm_provider.recommend(self._prompt_for(session))
+        session.schedules.clear()
+        session.recommendations.clear()
+        self._store_recommendations(db, session, result)
+
+        initial_user_message = next((message for message in session.messages if message.role == "user"), None)
+        if initial_user_message is not None:
+            initial_user_message.content = self._profile_summary(session)
+        initial_assistant_message = next(
+            (message for message in session.messages if message.role == "assistant"), None
+        )
+        if initial_assistant_message is None:
+            db.add(
+                ConversationMessage(
+                    session_id=session.id, role="assistant", content=result.assistant_summary
+                )
+            )
+        else:
+            initial_assistant_message.content = result.assistant_summary
+
+        db.commit()
+        return self.get_dashboard(db, session.id)
+
+    def _store_recommendations(
+        self, db: Session, session: CoachingSession, result: LLMRecommendationResult
+    ) -> None:
         catalog_by_code = {item.code: item for item in db.scalars(select(Certification)).all()}
         for candidate in result.candidates:
             certification = catalog_by_code.get(candidate.certification_code)
@@ -119,7 +162,7 @@ class CoachingService:
             db.add(recommendation)
             db.flush()
             for schedule in self.schedule_provider.get_schedules(
-                certification.code, target_acquisition_period
+                certification.code, session.target_acquisition_period
             ):
                 db.add(
                     CertificationSchedule(
@@ -138,8 +181,27 @@ class CoachingService:
                     )
                 )
 
-        db.commit()
-        return self.get_dashboard(db, session.id)
+    @staticmethod
+    def _prompt_for(session: CoachingSession) -> CoachingPrompt:
+        return CoachingPrompt(
+            desired_job=session.desired_job,
+            major_experience=session.major_experience,
+            owned_certifications=session.owned_certifications or [],
+            target_acquisition_period=session.target_acquisition_period,
+            interest_area=session.interest_area,
+            weekly_study_hours=session.weekly_study_hours,
+            learning_style=session.learning_style,
+            monthly_budget=session.monthly_budget,
+        )
+
+    @staticmethod
+    def _profile_summary(session: CoachingSession) -> str:
+        return (
+            f"관심 분야: {session.interest_area or '입력 없음'}\n"
+            f"주간 학습 시간: {session.weekly_study_hours or '입력 없음'}\n"
+            f"선호 학습 방식: {session.learning_style or '입력 없음'}\n"
+            f"월 학습 예산: {session.monthly_budget or '입력 없음'}"
+        )
 
     def delete_session(self, db: Session, session_id: int) -> None:
         session = self._get_session(db, session_id)

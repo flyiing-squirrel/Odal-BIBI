@@ -1,14 +1,19 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Protocol
 
 
 @dataclass(frozen=True)
 class CoachingPrompt:
-    desired_job: str
-    major_experience: str | None
-    owned_certifications: list[str]
-    target_acquisition_period: str
+    # Legacy fields remain optional so existing provider callers can transition safely.
+    desired_job: str | None = None
+    major_experience: str | None = None
+    owned_certifications: list[str] = field(default_factory=list)
+    target_acquisition_period: str | None = None
+    interest_area: str | None = None
+    weekly_study_hours: str | None = None
+    learning_style: str | None = None
+    monthly_budget: str | None = None
 
 
 @dataclass(frozen=True)
@@ -46,7 +51,7 @@ class ScheduleRecord:
 
 
 class ScheduleProvider(Protocol):
-    def get_schedules(self, certification_code: str, target_period: str) -> list[ScheduleRecord]:
+    def get_schedules(self, certification_code: str, target_period: str | None) -> list[ScheduleRecord]:
         """Return schedules from an official-site adapter or another trusted source."""
 
 

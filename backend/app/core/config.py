@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""
     bff_shared_secret: str = ""
     session_creation_limit_per_hour: int = Field(default=5, ge=1, le=100)
+    profile_updates_per_hour: int = Field(default=5, ge=1, le=100)
     chat_messages_per_hour: int = Field(default=30, ge=1, le=1000)
     rate_limit_window_seconds: int = Field(default=3600, ge=60, le=86400)
     db_pool_size: int = Field(default=1, ge=1, le=10)

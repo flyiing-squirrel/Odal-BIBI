@@ -7,8 +7,8 @@ from app.providers.groq_client import GroqClient, LLMError
 from app.providers.groq_llm import GroqLLMProvider
 from app.providers.mock_llm import MockLLMProvider
 from app.providers.official_schedule import (
-    MockOfficialScheduleAdapter,
     OfficialSiteScheduleProvider,
+    UnconfiguredOfficialScheduleAdapter,
 )
 from app.providers.web_search import TavilySearchProvider
 from app.schemas import (
@@ -19,6 +19,7 @@ from app.schemas import (
     CreateSessionResponse,
     DashboardResponse,
     MessageListResponse,
+    ProfileUpdate,
     RecommendationDetail,
     RecommendationListResponse,
     ScheduleListResponse,
@@ -53,7 +54,7 @@ llm_provider = (
 
 service = CoachingService(
     llm_provider=llm_provider,
-    schedule_provider=OfficialSiteScheduleProvider(MockOfficialScheduleAdapter()),
+    schedule_provider=OfficialSiteScheduleProvider(UnconfiguredOfficialScheduleAdapter()),
 )
 chat_service = ChatService(groq_client, search_provider, settings.chat_history_limit)
 
@@ -100,6 +101,43 @@ def create_coaching_session(
     return CreateSessionResponse.model_validate(
         {**dashboard.model_dump(), "session_token": session_token}
     )
+
+
+@router.patch(
+    "/coaching/sessions/{session_id}/profile",
+    response_model=DashboardResponse,
+    summary="프로필 수정 후 추천 갱신",
+    dependencies=[Depends(require_session_owner)],
+)
+def update_coaching_profile(
+    session_id: int,
+    payload: ProfileUpdate,
+    db: Session = Depends(get_db),
+    coaching_service: CoachingService = Depends(get_service),
+) -> DashboardResponse:
+    settings = get_settings()
+    enforce_rate_limit(
+        db,
+        scope="profile-update",
+        identity=str(session_id),
+        limit=settings.profile_updates_per_hour,
+        window_seconds=settings.rate_limit_window_seconds,
+        secret=settings.bff_shared_secret,
+    )
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="프로필 변경값이 없습니다.")
+    if "interest_area" in changes and changes["interest_area"] is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="관심 분야는 비워둘 수 없습니다.",
+        )
+    try:
+        return coaching_service.update_profile(db, session_id, changes)
+    except LookupError as error:
+        raise not_found(error) from error
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
 
 
 @router.get(

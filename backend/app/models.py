@@ -30,11 +30,15 @@ class CoachingSession(Base):
     __tablename__ = "coaching_sessions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    desired_job: Mapped[str] = mapped_column(String(200))
+    desired_job: Mapped[str | None] = mapped_column(String(200), nullable=True)
     major_experience: Mapped[str | None] = mapped_column(Text, nullable=True)
-    owned_certifications: Mapped[list[str]] = mapped_column(JSON, default=list)
-    target_acquisition_period: Mapped[str] = mapped_column(String(100))
+    owned_certifications: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    target_acquisition_period: Mapped[str | None] = mapped_column(String(100), nullable=True)
     session_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True, index=True)
+    interest_area: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    weekly_study_hours: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    learning_style: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    monthly_budget: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     recommendations: Mapped[list["CertificationRecommendation"]] = relationship(

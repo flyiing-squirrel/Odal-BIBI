@@ -5,24 +5,41 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CoachInput(BaseModel):
-    """The four inputs collected by the dashboard."""
+    """Profile fields collected by the dashboard plus optional legacy fields."""
 
-    desired_job: str = Field(..., min_length=1, max_length=200, description="희망직무")
-    major_experience: str | None = Field(default=None, max_length=3000, description="전공 관련 경험")
-    owned_certifications: list[str] = Field(default_factory=list, description="보유 자격증")
-    target_acquisition_period: str = Field(
-        ..., min_length=1, max_length=100, description="목표 취득 시기"
-    )
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    interest_area: str = Field(..., min_length=1, max_length=200, description="관심 분야")
+    weekly_study_hours: str | None = Field(default=None, max_length=100, description="주간 학습 시간")
+    learning_style: str | None = Field(default=None, max_length=100, description="선호 학습 방식")
+    monthly_budget: str | None = Field(default=None, max_length=100, description="월 학습 예산")
+    desired_job: str | None = Field(default=None, max_length=200, description="이전 버전 희망직무")
+    major_experience: str | None = Field(default=None, max_length=3000, description="이전 버전 전공 경험")
+    owned_certifications: list[str] | None = Field(default=None, description="이전 버전 보유 자격증")
+    target_acquisition_period: str | None = Field(default=None, max_length=100, description="이전 버전 목표 시기")
+
+
+class ProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    interest_area: str | None = Field(default=None, min_length=1, max_length=200)
+    weekly_study_hours: str | None = Field(default=None, max_length=100)
+    learning_style: str | None = Field(default=None, max_length=100)
+    monthly_budget: str | None = Field(default=None, max_length=100)
 
 
 class SessionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    desired_job: str
+    desired_job: str | None
     major_experience: str | None
-    owned_certifications: list[str]
-    target_acquisition_period: str
+    owned_certifications: list[str] | None
+    target_acquisition_period: str | None
+    interest_area: str | None
+    weekly_study_hours: str | None
+    learning_style: str | None
+    monthly_budget: str | None
     created_at: datetime
 
 

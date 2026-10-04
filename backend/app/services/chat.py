@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
@@ -46,7 +46,7 @@ ANSWER_PROMPT = """너는 처음 자격증 준비를 시작하는 사람을 돕�
 2. [검색 결과]에 없는 위 항목은 "약", "보통" 같은 추정으로도 쓰지 않는다. "미확인"이라고 쓰고 주관기관 이름만 안내한다 (URL을 지어내지 않는다).
 3. 오늘 날짜 기준으로 이미 지난 회차는 "지난 회차"로 표시하고 다음 회차를 우선 안내한다.
 4. 뉴스·블로그 출처는 공식 근거가 아님을 밝힌다.
-5. [사용자 정보]의 희망직무·목표 시기·추천 결과에 맞춰 답한다.
+5. [사용자 정보]의 관심 분야·학습 여건·추천 결과에 맞춰 답한다.
 
 오늘 날짜: {today}"""
 
@@ -118,7 +118,7 @@ class ChatService:
         return ChatResult(intent.intent, user_message, assistant_message, notices)
 
     def _analyze(self, message: str, context: str, history: list[dict]) -> IntentResult:
-        today = date.today()
+        today = datetime.now(UTC).date()
         messages = [
             {"role": "system", "content": INTENT_PROMPT.format(today=today.isoformat(), year=today.year)},
             *history,
@@ -197,7 +197,10 @@ class ChatService:
             + f"[질문]\n{message}"
         )
         return [
-            {"role": "system", "content": ANSWER_PROMPT.format(today=date.today().isoformat())},
+            {
+                "role": "system",
+                "content": ANSWER_PROMPT.format(today=datetime.now(UTC).date().isoformat()),
+            },
             *history,
             {"role": "user", "content": user_text},
         ]
@@ -209,7 +212,11 @@ class ChatService:
         )
         return json.dumps(
             {
-                "희망직무": session.desired_job,
+                "관심 분야": session.interest_area,
+                "주간 학습 시간": session.weekly_study_hours,
+                "선호 학습 방식": session.learning_style,
+                "월 학습 예산": session.monthly_budget,
+                "이전 버전 희망직무": session.desired_job,
                 "전공 관련 경험": session.major_experience,
                 "보유 자격증": session.owned_certifications,
                 "목표 취득 시기": session.target_acquisition_period,
