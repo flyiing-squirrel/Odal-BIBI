@@ -56,12 +56,29 @@ NO_SOURCES_REMINDER = (
     "학습 순서·방법 같은 일반적인 조언만 한다. 필요한 사실은 \"미확인 — 주관기관 공식 사이트에서 확인\"으로 쓴다."
 )
 
-# 검색 결과 없이 답할 때 나오면 안 되는 표현: 금액, 월 단위 날짜, 연 N회
-UNSOURCED_FACT_PATTERN = re.compile(
+# 출처 번호 없이 나오면 안 되는 표현: 금액, 월 단위·숫자형 날짜, 연 N회, URL
+FACT_PATTERN = re.compile(
     r"\d[\d,]*\s*(?:~\s*\d[\d,]*\s*)?(?:만\s*)?원"
     r"|\d{1,2}\s*(?:~\s*\d{1,2}\s*)?월"
+    r"|\d{4}\s*[-./]\s*\d{1,2}\s*[-./]\s*\d{1,2}"
     r"|연\s*\d+\s*(?:~\s*\d+\s*)?회"
+    r"|https?://\S+"
 )
+CITATION_PATTERN = re.compile(r"\[(\d+)\]")
+
+
+def ungrounded_parts(line: str, hit_count: int) -> list[str]:
+    """줄에서 근거가 없는 표현을 반환한다.
+
+    - 검색 결과 범위를 벗어난 출처 번호 [n]은 항상 문제다.
+    - 사실 표현(FACT_PATTERN)이 있는 줄은 범위 안의 출처 번호가 하나 이상 있어야 한다.
+      검색 결과가 없으면(hit_count=0) 유효한 번호가 있을 수 없으므로 사실 표현 자체가 문제다.
+    """
+    citations = [int(n) for n in CITATION_PATTERN.findall(line)]
+    invalid = [f"[{n}]" for n in citations if not 1 <= n <= hit_count]
+    has_valid = any(1 <= n <= hit_count for n in citations)
+    facts = [] if has_valid else [m.group() for m in FACT_PATTERN.finditer(line)]
+    return invalid + facts
 
 
 class IntentResult(BaseModel):
@@ -103,8 +120,7 @@ class ChatService:
         hits = self._search(intent, notices)
         messages = self._answer_messages(message, context, history, intent, hits)
         answer = self.client.complete(messages, max_tokens=1500)
-        if not hits:
-            answer = self._remove_unsourced_facts(messages, answer)
+        answer = self._enforce_grounding(messages, answer, len(hits))
 
         user_message = ConversationMessage(session_id=session.id, role="user", content=message)
         assistant_message = ConversationMessage(
@@ -132,26 +148,28 @@ class ChatService:
             logger.warning("의도 분석 결과 형식 오류: %s / raw=%s", error, raw)
             return IntentResult(intent="general", search_queries=[message[:100]])
 
-    def _remove_unsourced_facts(self, messages: list[dict], answer: str) -> str:
-        """검색 근거 없이 나온 금액·날짜를 한 번 다시 쓰게 하고, 그래도 남으면 해당 줄을 지운다."""
-        found = [m.group() for m in UNSOURCED_FACT_PATTERN.finditer(answer)]
+    def _enforce_grounding(self, messages: list[dict], answer: str, hit_count: int) -> str:
+        """근거 없는 금액·날짜·URL·출처 번호가 있으면 한 번 다시 쓰게 하고, 그래도 남으면 해당 줄을 지운다."""
+        found = [part for line in answer.splitlines() for part in ungrounded_parts(line, hit_count)]
         if not found:
             return answer
-        logger.warning("근거 없는 사실 표현 감지, 재작성 요청: %s", found)
-        retry = [
-            *messages,
-            {"role": "assistant", "content": answer},
-            {
-                "role": "user",
-                "content": f"검색 근거가 없는 표현이 있다: {', '.join(found)}. "
-                "이 표현이 들어간 내용을 빼고 같은 형식으로 답변 전체를 다시 써라.",
-            },
-        ]
+        logger.warning("근거 없는 표현 감지, 재작성 요청: %s", found)
+        instruction = (
+            f"검색 근거가 없는 표현이 있다: {', '.join(found)}. "
+            + (
+                f"사실 표현에는 [1]~[{hit_count}] 중 실제 근거가 되는 출처 번호를 붙이고, 근거가 없으면 그 내용을 빼고 "
+                if hit_count
+                else "이 표현이 들어간 내용을 빼고 "
+            )
+            + "같은 형식으로 답변 전체를 다시 써라."
+        )
+        retry = [*messages, {"role": "assistant", "content": answer}, {"role": "user", "content": instruction}]
         answer = self.client.complete(retry, max_tokens=1500)
-        if UNSOURCED_FACT_PATTERN.search(answer):
+        lines = answer.splitlines()
+        kept = [line for line in lines if not ungrounded_parts(line, hit_count)]
+        if len(kept) != len(lines):
             logger.warning("재작성 후에도 근거 없는 표현이 남아 해당 줄 제거")
-            answer = "\n".join(line for line in answer.splitlines() if not UNSOURCED_FACT_PATTERN.search(line))
-        return answer
+        return "\n".join(kept)
 
     def _search(self, intent: IntentResult, notices: list[str]) -> list[SearchHit]:
         if not intent.search_queries:
