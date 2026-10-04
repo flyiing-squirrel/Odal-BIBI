@@ -58,7 +58,7 @@ cp .env.example .env    # GROQ_API_KEY, TAVILY_API_KEY 채우기 (비워둬도 �
 docker compose up --build
 ```
 
-DB만 Docker로 띄우고 API는 로컬에서 자동 재시작으로 개발할 수도 있습니다. Python 3.11 이상을 권장합니다.
+DB만 Docker로 띄우고 API는 로컬에서 자동 재시작으로 개발할 수도 있습니다. 백엔드 실행에는 Python 3.12가 필요합니다.
 
 ```bash
 docker compose up -d db
@@ -66,6 +66,7 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
@@ -73,7 +74,7 @@ uvicorn app.main:app --reload
 - ReDoc: <http://localhost:8000/redoc>
 - Health check: <http://localhost:8000/health>
 
-PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데이터는 `pgdata` 볼륨에 유지됩니다. 테이블은 앱 시작 시 `create_all`로 생성되므로, 모델 컬럼이 바뀌면 `docker compose down -v`로 볼륨을 지우고 다시 띄워야 합니다.
+PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데이터는 `pgdata` 볼륨에 유지됩니다. 스키마와 자격증명 카탈로그는 Alembic migration으로 관리합니다. 모델을 바꿀 때 데이터 볼륨을 지우지 말고 새 migration을 적용하세요. `.env`의 `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT`, `DB_POOL_PRE_PING` 값으로 API 프로세스별 연결 풀을 제한할 수 있습니다.
 
 ### API 키 관리
 

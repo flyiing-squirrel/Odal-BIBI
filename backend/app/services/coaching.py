@@ -5,12 +5,11 @@ from app.models import (
     Certification,
     CertificationRecommendation,
     CertificationSchedule,
-    ConversationMessage,
     CoachingSession,
+    ConversationMessage,
 )
 from app.providers.base import CoachingPrompt, LLMProvider, ScheduleProvider
 from app.schemas import DashboardResponse
-
 
 CATALOG = [
     {
@@ -63,13 +62,6 @@ class CoachingService:
         self.llm_provider = llm_provider
         self.schedule_provider = schedule_provider
 
-    def ensure_catalog(self, db: Session) -> None:
-        existing_codes = set(db.scalars(select(Certification.code)).all())
-        for item in CATALOG:
-            if item["code"] not in existing_codes:
-                db.add(Certification(**item))
-        db.commit()
-
     def create_session(
         self,
         db: Session,
@@ -78,7 +70,6 @@ class CoachingService:
         owned_certifications: list[str],
         target_acquisition_period: str,
     ) -> DashboardResponse:
-        self.ensure_catalog(db)
         session = CoachingSession(
             desired_job=desired_job,
             major_experience=major_experience,

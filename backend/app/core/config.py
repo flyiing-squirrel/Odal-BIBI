@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # .env는 저장소 루트에 하나만 둔다 (backend/에서 실행해도 루트 .env를 읽음).
@@ -16,6 +17,10 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
     tavily_api_key: str = ""
+    db_pool_size: int = Field(default=1, ge=1, le=10)
+    db_max_overflow: int = Field(default=0, ge=0, le=10)
+    db_pool_timeout: float = Field(default=5, gt=0, le=60)
+    db_pool_pre_ping: bool = True
     # 대화 응답 생성 시 함께 넣을 이전 메시지 수
     chat_history_limit: int = 8
 

@@ -32,17 +32,18 @@
 
 ## Task 1: PostgreSQL 스키마 수명주기를 Alembic으로 옮기기
 
-**Files:** `backend/app/main.py`, `backend/app/db.py`, `backend/app/core/config.py`, `backend/app/services/coaching.py`, `backend/app/models.py`, `backend/alembic.ini`, `backend/alembic/env.py`, `backend/alembic/versions/`, `backend/pyproject.toml`, `backend/uv.lock`.
+**Files:** `backend/app/main.py`, `backend/app/db.py`, `backend/app/core/config.py`, `backend/app/services/coaching.py`, `backend/app/models.py`, `backend/alembic.ini`, `backend/alembic/env.py`, `backend/alembic/versions/`, `backend/pyproject.toml`, `backend/requirements.txt`, `backend/.python-version`, `backend/uv.lock`, `.env.example`, `README.md`.
 
-- [ ] `main.py`의 lifespan에서 `Base.metadata.create_all()`과 `ensure_catalog()` 호출을 제거한다. `CoachingService.create_session()`이 매 요청마다 catalog seed를 수행하지 않게 한다.
-- [ ] 현재 모델을 생성하는 초기 Alembic revision을 작성하고, 정적 자격증명 catalog를 revision 안에서 안정적인 코드 키로 삽입한다. 향후 catalog 갱신은 별도 revision으로 관리한다.
-- [ ] `backend/app/db.py`에서 PostgreSQL 엔진의 `pool_size`, `max_overflow`, `pool_timeout`, `pool_pre_ping`을 설정값으로 제한한다. SQLite 로컬 실행 설정은 유지한다.
-- [ ] Python 버전을 3.12로 고정하고 `uv.lock`을 생성해 배포 의존성을 재현 가능하게 한다.
-- [ ] 변경을 `db: add Alembic migrations and serverless pool limits` 메시지로 커밋한다.
+- [x] `main.py`의 lifespan에서 `Base.metadata.create_all()`과 `ensure_catalog()` 호출을 제거한다. `CoachingService.create_session()`이 매 요청마다 catalog seed를 수행하지 않게 한다.
+- [x] 현재 모델을 생성하는 초기 Alembic revision을 작성하고, 정적 자격증명 catalog를 revision 안에서 안정적인 코드 키로 삽입한다. 향후 catalog 갱신은 별도 revision으로 관리한다.
+- [x] `backend/app/db.py`에서 PostgreSQL 엔진의 `pool_size`, `max_overflow`, `pool_timeout`, `pool_pre_ping`을 설정값으로 제한한다. SQLite 로컬 실행 설정은 유지한다.
+- [x] Python 버전을 3.12로 고정하고 `uv.lock`을 생성해 배포 의존성을 재현 가능하게 한다.
+- [x] README의 로컬 실행 절차에 `alembic upgrade head`를 추가하고, 앱 시작 시 테이블이 자동 생성된다는 기존 설명을 제거한다. 풀 설정 이름은 `.env.example`에 기록한다.
+- [x] 변경을 `db: add Alembic migrations and serverless pool limits` 메시지로 커밋한다.
 
 **Interfaces:** `get_settings() -> Settings`; `get_db() -> Generator[Session, None, None]`; migration URL은 `DATABASE_URL` 설정을 읽고 psycopg SQLAlchemy URL을 사용한다.
 
-**Verification:** `python -m compileall -q backend/app`, `ruff check backend`, `alembic upgrade --sql head` 출력과 `git diff --check`를 확인한다. 애플리케이션 시작·세션 생성 코드에 schema DDL 또는 catalog seed가 남지 않았는지 검색한다.
+**Verification:** Python 3.12 환경에서 `python -m compileall -q app`, `ruff check app/db.py app/core/config.py app/main.py app/services/coaching.py alembic`, `alembic upgrade --sql head`, `uv lock --check`, `git diff --check`를 확인한다. 앱 시작·세션 생성 코드에 schema DDL 또는 catalog seed가 남지 않았는지 검색한다. 전체 `ruff check app alembic`은 기존 코드의 lint 항목 29개를 보고하므로, 이 task에서는 변경 범위만 검사한다.
 
 ## Task 2: 세션 capability와 Next.js same-origin 프록시 구현
 
