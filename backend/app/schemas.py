@@ -94,6 +94,24 @@ class ChatMessageCreate(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000, description="사용자 메시지")
 
 
+class BrowserConversationMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    id: int = Field(..., ge=1)
+    role: Literal["user", "assistant", "system"]
+    content: str = Field(..., min_length=1, max_length=4000)
+    sources: list[SourceItem] = Field(default_factory=list, max_length=8)
+    created_at: datetime
+
+
+class BrowserChatMessageCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    profile: CoachInput
+    conversation: list[BrowserConversationMessage] = Field(default_factory=list, max_length=20)
+    message: str = Field(..., min_length=1, max_length=2000, description="사용자 메시지")
+
+
 class ChatReplyResponse(BaseModel):
     session_id: int
     intent: Literal["recommend", "schedule", "study_path", "general"]

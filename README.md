@@ -1,6 +1,6 @@
 # Odal BIBI
 
-자격증 준비를 위한 대시보드 UI와 FastAPI 백엔드를 담은 저장소입니다. 웹 UI는 추천, 일정, 프로필, 채팅 네 영역에서 비공개 브라우저 세션 API를 사용합니다.
+자격증 준비를 위한 대시보드 UI와 FastAPI 백엔드를 담은 저장소입니다. 현재 Vercel Preview는 추천, 일정, 프로필, 채팅 데이터를 각 브라우저의 저장소에 보관하고, FastAPI는 Groq·Tavily 호출과 근거 검증만 수행합니다.
 
 ## 대시보드 UI
 
@@ -11,10 +11,13 @@ npm install
 npm run dev
 ```
 
-- 프로필 저장 후 API가 반환한 추천·대화 데이터를 표시합니다.
-- 브라우저에는 비밀이 아닌 `session_id`만 `localStorage`에 저장하고, 프로필·대화 내용은 API에서 다시 불러옵니다.
-- 세션 token은 same-origin Next.js 프록시가 HttpOnly 쿠키로 관리하며 JavaScript에서 읽을 수 없습니다.
+- 프로필 저장 후 API가 반환한 추천·대화 데이터를 표시하고, 전체 대시보드를 버전이 붙은 `localStorage` 레코드로 저장합니다.
+- 새로고침 뒤에도 같은 브라우저와 origin에서 데이터를 복원합니다. 사이트 데이터를 지우거나 다른 기기에서 열면 새 대시보드가 시작됩니다.
+- Groq·Tavily 키는 Next.js BFF를 거쳐 FastAPI에서만 사용합니다. 브라우저 저장소에는 provider 키나 인증 정보가 들어가지 않습니다.
 - 확인된 공식 일정이 없으면 일정 탭에 확인 대기 상태를 표시합니다.
+- Google Calendar 동기화는 서버 저장소가 필요한 OAuth 토큰을 보관할 수 없어 Preview에서 비활성화합니다.
+
+Preview 환경변수와 배포 순서는 [Vercel 배포 설정 안내](docs/deployment/vercel.md)를 따릅니다. 이 문서 아래의 PostgreSQL·세션 token·Google Calendar API 설명은 다음 상태 저장형 배포를 위한 기존 API 문서입니다.
 
 ## 폴더 구조
 

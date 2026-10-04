@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 from sqlalchemy import select
@@ -110,6 +111,62 @@ class CoachingService:
 
         db.commit()
         return self.get_dashboard(db, session.id)
+
+    def create_browser_dashboard(self, profile: dict) -> DashboardResponse:
+        """Build a dashboard response without persisting a server-side session."""
+        prompt = CoachingPrompt(
+            desired_job=profile.get("desired_job"),
+            major_experience=profile.get("major_experience"),
+            owned_certifications=profile.get("owned_certifications") or [],
+            target_acquisition_period=profile.get("target_acquisition_period"),
+            interest_area=profile["interest_area"],
+            weekly_study_hours=profile.get("weekly_study_hours"),
+            learning_style=profile.get("learning_style"),
+            monthly_budget=profile.get("monthly_budget"),
+        )
+        result = self.llm_provider.recommend(prompt)
+        catalog_by_code = {item["code"]: item for item in CATALOG}
+        created_at = datetime.now(UTC)
+        recommendations = []
+        for candidate in result.candidates:
+            certification = catalog_by_code.get(candidate.certification_code)
+            if certification is None:
+                continue
+            recommendations.append(
+                {
+                    "id": candidate.rank,
+                    "rank": candidate.rank,
+                    "match_score": candidate.match_score,
+                    "priority": candidate.priority,
+                    "reason": candidate.reason,
+                    "study_plan_hint": candidate.study_plan_hint,
+                    "certification": {"id": candidate.rank, **certification},
+                }
+            )
+
+        return DashboardResponse.model_validate(
+            {
+                "session": {"id": 1, "created_at": created_at, **profile},
+                "recommendations": recommendations,
+                "conversation": [
+                    {
+                        "id": 1,
+                        "role": "user",
+                        "content": self._browser_profile_summary(profile),
+                        "sources": [],
+                        "created_at": created_at,
+                    },
+                    {
+                        "id": 2,
+                        "role": "assistant",
+                        "content": result.assistant_summary,
+                        "sources": [],
+                        "created_at": created_at,
+                    },
+                ],
+                "schedules": [],
+            }
+        )
 
     def update_profile(
         self, db: Session, session_id: int, changes: dict[str, str | None]
@@ -235,6 +292,15 @@ class CoachingService:
             f"주간 학습 시간: {session.weekly_study_hours or '입력 없음'}\n"
             f"선호 학습 방식: {session.learning_style or '입력 없음'}\n"
             f"월 학습 예산: {session.monthly_budget or '입력 없음'}"
+        )
+
+    @staticmethod
+    def _browser_profile_summary(profile: dict) -> str:
+        return (
+            f"관심 분야: {profile.get('interest_area') or '입력 없음'}\n"
+            f"주간 학습 시간: {profile.get('weekly_study_hours') or '입력 없음'}\n"
+            f"선호 학습 방식: {profile.get('learning_style') or '입력 없음'}\n"
+            f"월 학습 예산: {profile.get('monthly_budget') or '입력 없음'}"
         )
 
     def delete_session(self, db: Session, session_id: int) -> None:

@@ -26,6 +26,7 @@ from app.providers.base import (
 from app.providers.evidence_verifier import EvidenceVerifier
 from app.providers.groq_client import GroqClient, LLMError
 from app.providers.web_search import SearchError, is_safe_search_url
+from app.services.coaching import CATALOG
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,14 @@ class ChatResult:
     notices: list[str] = field(default_factory=list)
 
 
+@dataclass
+class BrowserChatResult:
+    intent: str
+    user_message: dict
+    assistant_message: dict
+    notices: list[str] = field(default_factory=list)
+
+
 class ChatService:
     """세션 대화: 요청 분류 → 검색 → 구조화 답변 → 출처 및 주장 검증."""
 
@@ -165,6 +174,71 @@ class ChatService:
         db.add_all([user_message, assistant_message])
         db.commit()
         return ChatResult(intent.intent, user_message, assistant_message, notices)
+
+    def reply_browser(
+        self, profile: dict, conversation: list[dict], message: str
+    ) -> BrowserChatResult:
+        """Generate a reply from browser-provided context without persisting it."""
+        if self.client is None:
+            raise ChatNotConfiguredError("GROQ_API_KEY가 설정되지 않았습니다.")
+
+        context = self._browser_user_context(profile)
+        history = [
+            {"role": item["role"], "content": item["content"]}
+            for item in conversation[-self.history_limit :]
+        ]
+        notices: list[str] = []
+        analysis_failed = False
+        try:
+            intent = self._analyze(message, context, history)
+        except LLMError as error:
+            logger.warning("요청 분석 실패 (%s)", type(error).__name__)
+            intent = IntentResult()
+            analysis_failed = True
+            notices.append("요청을 분석하지 못해 검색 기반 답변을 만들지 못했어요.")
+
+        hits = [] if analysis_failed else self._search(intent, notices)
+        generated: GeneratedAnswer | None = None
+        if not analysis_failed:
+            try:
+                raw = self.client.complete_json(
+                    self._answer_messages(message, context, history, intent, hits),
+                    temperature=0,
+                    max_tokens=1500,
+                )
+                generated = GeneratedAnswer.model_validate(raw)
+            except (LLMError, ValidationError) as error:
+                logger.warning("구조화 답변 생성 실패 (%s)", type(error).__name__)
+                notices.append("답변 형식이나 생성 상태를 확인하지 못해 사실 정보를 표시하지 않았어요.")
+
+        if generated is None:
+            answer = NO_VERIFIED_ANSWER
+            used_sources: list[SearchHit] = []
+        else:
+            domains = self._browser_official_domains(intent.certificate, message)
+            answer, used_sources, omitted_claims = self._render_verified_answer(
+                generated, hits, domains, require_official_facts=intent.intent == "schedule"
+            )
+            if omitted_claims:
+                notices.append(UNVERIFIED_NOTICE)
+
+        next_id = max((item["id"] for item in conversation), default=0) + 1
+        created_at = datetime.now(UTC)
+        user_message = {
+            "id": next_id,
+            "role": "user",
+            "content": message,
+            "sources": [],
+            "created_at": created_at,
+        }
+        assistant_message = {
+            "id": next_id + 1,
+            "role": "assistant",
+            "content": answer,
+            "sources": [{"title": source.title, "url": source.url} for source in used_sources],
+            "created_at": created_at,
+        }
+        return BrowserChatResult(intent.intent, user_message, assistant_message, notices)
 
     def _analyze(self, message: str, context: dict, history: list[dict]) -> IntentResult:
         today = datetime.now(UTC).date()
@@ -363,6 +437,26 @@ class ChatService:
         return domains
 
     @staticmethod
+    def _browser_official_domains(certificate_name: str | None, message: str) -> set[str]:
+        intent_key = _normalize(certificate_name or "")
+        message_key = _normalize(message)
+        domains: set[str] = set()
+        for certificate in CATALOG:
+            names = {_normalize(certificate["code"]), _normalize(certificate["name"])}
+            if not any(name and (name == intent_key or name in message_key) for name in names):
+                continue
+            try:
+                parsed = urlsplit(certificate["official_url"])
+                if parsed.scheme == "https" and parsed.hostname:
+                    domain = parsed.hostname.lower().rstrip(".")
+                    domains.add(domain)
+                    if domain.startswith("www."):
+                        domains.add(domain[4:])
+            except ValueError:
+                continue
+        return domains
+
+    @staticmethod
     def _is_official_source(hit: SearchHit, domains: set[str]) -> bool:
         try:
             parsed = urlsplit(hit.url)
@@ -389,6 +483,20 @@ class ChatService:
             "legacy_owned_certifications": session.owned_certifications,
             "legacy_target_period": session.target_acquisition_period,
             "recommendations": recommended,
+        }
+
+    @staticmethod
+    def _browser_user_context(profile: dict) -> dict:
+        return {
+            "interest_area": profile.get("interest_area"),
+            "weekly_study_hours": profile.get("weekly_study_hours"),
+            "learning_style": profile.get("learning_style"),
+            "monthly_budget": profile.get("monthly_budget"),
+            "legacy_desired_job": profile.get("desired_job"),
+            "legacy_major_experience": profile.get("major_experience"),
+            "legacy_owned_certifications": profile.get("owned_certifications"),
+            "legacy_target_period": profile.get("target_acquisition_period"),
+            "recommendations": [],
         }
 
     @staticmethod

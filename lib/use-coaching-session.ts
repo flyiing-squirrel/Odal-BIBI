@@ -3,11 +3,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 import {
-  ApiError,
-  createSession,
-  getDashboard,
-  sendMessage as sendChatMessage,
-  updateProfile as saveRemoteProfile,
+  createBrowserDashboard,
+  sendBrowserMessage,
   type CoachProfileInput,
   type DashboardResponse,
 } from "@/lib/api";
@@ -19,8 +16,12 @@ export type Profile = {
   budget: string;
 };
 
-const SESSION_ID_KEY = "odal-bibi-session-id";
-const LEGACY_LOCAL_KEYS = ["odal-bibi-profile", "odal-bibi-chat"];
+const DASHBOARD_STORAGE_KEY = "odal-bibi-browser-dashboard-v1";
+const LEGACY_LOCAL_KEYS = [
+  "odal-bibi-profile",
+  "odal-bibi-chat",
+  "odal-bibi-session-id",
+];
 
 const emptyProfile: Profile = {
   career: "",
@@ -51,10 +52,36 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "잠시 후 다시 시도해 주세요.";
 }
 
+function isDashboardResponse(value: unknown): value is DashboardResponse {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.session === "object" &&
+    record.session !== null &&
+    Array.isArray(record.recommendations) &&
+    Array.isArray(record.conversation) &&
+    Array.isArray(record.schedules)
+  );
+}
+
+function readDashboard(): DashboardResponse | null {
+  const stored = window.localStorage.getItem(DASHBOARD_STORAGE_KEY);
+  if (!stored) return null;
+  try {
+    const parsed: unknown = JSON.parse(stored);
+    return isDashboardResponse(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistDashboard(dashboard: DashboardResponse): void {
+  window.localStorage.setItem(DASHBOARD_STORAGE_KEY, JSON.stringify(dashboard));
+}
+
 export function useCoachingSession() {
   const [profile, setProfile] = useState<Profile>(emptyProfile);
   const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
-  const [sessionId, setSessionId] = useState<number | null>(null);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
@@ -66,66 +93,23 @@ export function useCoachingSession() {
 
   useEffect(() => {
     let cancelled = false;
-
-    async function loadSavedSession() {
-      let rawSessionId: string | null;
+    queueMicrotask(() => {
       try {
         for (const key of LEGACY_LOCAL_KEYS) window.localStorage.removeItem(key);
-        rawSessionId = window.localStorage.getItem(SESSION_ID_KEY);
+        const savedDashboard = readDashboard();
+        if (savedDashboard && !cancelled) {
+          setDashboard(savedDashboard);
+          setProfile(profileFromDashboard(savedDashboard));
+          setProfileSaved(true);
+        }
       } catch {
-        await Promise.resolve();
         if (!cancelled) {
-          setError("브라우저 저장소에 접근할 수 없어 세션을 자동으로 불러오지 못했어요.");
-          setIsHydrated(true);
-        }
-        return;
-      }
-
-      const storedSessionId = rawSessionId ? Number(rawSessionId) : NaN;
-      if (!Number.isSafeInteger(storedSessionId) || storedSessionId < 1) {
-        if (rawSessionId) {
-          try {
-            window.localStorage.removeItem(SESSION_ID_KEY);
-          } catch {
-            // Continue with an empty session if browser storage is unavailable.
-          }
-        }
-        await Promise.resolve();
-        if (!cancelled) setIsHydrated(true);
-        return;
-      }
-
-      try {
-        const savedDashboard = await getDashboard(storedSessionId);
-        if (cancelled) return;
-        setSessionId(storedSessionId);
-        setDashboard(savedDashboard);
-        setProfile(profileFromDashboard(savedDashboard));
-        setProfileSaved(true);
-        setError(null);
-      } catch (loadError) {
-        if (cancelled) return;
-        if (loadError instanceof ApiError && loadError.status === 404) {
-          try {
-            window.localStorage.removeItem(SESSION_ID_KEY);
-          } catch {
-            // The next session save can overwrite this stale id when storage is available.
-          }
-          setSessionId(null);
-          setDashboard(null);
-          setProfile(emptyProfile);
-          setProfileSaved(false);
-          setError("저장된 세션을 찾지 못했어요. 프로필을 저장해 새 세션을 시작해 주세요.");
-        } else {
-          setSessionId(storedSessionId);
-          setError(errorMessage(loadError));
+          setError("브라우저 저장소에 접근할 수 없어 저장된 대시보드를 불러오지 못했어요.");
         }
       } finally {
         if (!cancelled) setIsHydrated(true);
       }
-    }
-
-    void loadSavedSession();
+    });
     return () => {
       cancelled = true;
     };
@@ -136,20 +120,11 @@ export function useCoachingSession() {
     setIsSavingProfile(true);
     setError(null);
     try {
-      const input = apiProfile(profile);
-      const savedDashboard = sessionId
-        ? await saveRemoteProfile(sessionId, input)
-        : await createSession(input);
-      const savedSessionId = savedDashboard.session.id;
-      setSessionId(savedSessionId);
+      const savedDashboard = await createBrowserDashboard(apiProfile(profile));
       setDashboard(savedDashboard);
       setProfile(profileFromDashboard(savedDashboard));
       setProfileSaved(true);
-      try {
-        window.localStorage.setItem(SESSION_ID_KEY, String(savedSessionId));
-      } catch {
-        setError("프로필은 저장했지만 브라우저에 세션 ID를 저장하지 못했어요. 새로고침하면 다시 연결해야 합니다.");
-      }
+      persistDashboard(savedDashboard);
     } catch (saveError) {
       setError(errorMessage(saveError));
     } finally {
@@ -159,22 +134,20 @@ export function useCoachingSession() {
 
   async function sendMessage(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || !sessionId || isSendingMessage) return;
+    if (!trimmed || !dashboard || !profileSaved || isSendingMessage) return;
 
     setIsSendingMessage(true);
     setError(null);
     setChatNotices([]);
     try {
-      const reply = await sendChatMessage(sessionId, trimmed);
+      const reply = await sendBrowserMessage(apiProfile(profile), dashboard.conversation, trimmed);
+      const updatedDashboard = {
+        ...dashboard,
+        conversation: [...dashboard.conversation, reply.user_message, reply.assistant_message],
+      };
       setChatNotices(reply.notices);
-      setDashboard((current) =>
-        current
-          ? {
-              ...current,
-              conversation: [...current.conversation, reply.user_message, reply.assistant_message],
-            }
-          : current,
-      );
+      setDashboard(updatedDashboard);
+      persistDashboard(updatedDashboard);
       setDraft("");
     } catch (sendError) {
       setError(errorMessage(sendError));
@@ -189,6 +162,7 @@ export function useCoachingSession() {
   }
 
   function retryLoad() {
+    setError(null);
     setIsHydrated(false);
     setLoadAttempt((value) => value + 1);
   }
@@ -196,7 +170,7 @@ export function useCoachingSession() {
   return {
     profile,
     dashboard,
-    sessionId,
+    sessionId: dashboard?.session.id ?? null,
     isHydrated,
     isSavingProfile,
     isSendingMessage,

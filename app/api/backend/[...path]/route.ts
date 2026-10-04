@@ -17,7 +17,10 @@ function isAllowedPath(path: string[]): boolean {
     path[2] === "coaching" &&
     path[3] === "sessions";
   const isGoogleCallback = path.join("/") === "api/v1/calendar/callback";
-  return isCoachingRoute || isGoogleCallback;
+  const isBrowserSessionRoute =
+    path.join("/") === "api/v1/coaching/browser-session" ||
+    path.join("/") === "api/v1/coaching/browser-session/messages";
+  return isCoachingRoute || isBrowserSessionRoute || isGoogleCallback;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -4,7 +4,6 @@ import {
   useEffect,
   useRef,
   useState,
-  useSyncExternalStore,
   type FormEvent,
   type RefObject,
 } from "react";
@@ -42,13 +41,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  connectGoogleCalendar,
-  disconnectGoogleCalendar,
-  getGoogleCalendarStatus,
-  syncScheduleToGoogleCalendar,
-  ApiError,
   type ConversationMessageResponse,
-  type GoogleCalendarStatus,
   type RecommendationSummary,
   type ScheduleResponse,
 } from "@/lib/api";
@@ -83,26 +76,8 @@ function safeHttpUrl(value: string): string | null {
   }
 }
 
-function calendarErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    if (error.status === 409) return "Google Calendar 권한이 만료됐습니다. 다시 연결해 주세요.";
-    if (error.status === 502) return "Google Calendar 요청을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.";
-    if (error.status === 503) return "Google Calendar 설정이 준비되지 않았습니다.";
-    return "Google Calendar 요청을 처리하지 못했습니다.";
-  }
-  return fallback;
-}
-
 export default function Home() {
   const [activeSection, setActiveSection] = useState<Section>("recommend");
-  const calendarResult = useSyncExternalStore(
-    (notify) => {
-      window.addEventListener("popstate", notify);
-      return () => window.removeEventListener("popstate", notify);
-    },
-    () => new URLSearchParams(window.location.search).get("calendar") ?? "",
-    () => "",
-  );
   const {
     profile,
     dashboard,
@@ -125,14 +100,6 @@ export default function Home() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [dashboard?.conversation]);
-
-  const calendarNotices: Record<string, string> = {
-    connected: "Google Calendar가 연결되었습니다.",
-    cancelled: "Google Calendar 연결을 취소했습니다.",
-    failed: "Google Calendar 연결을 완료하지 못했습니다. 다시 시도해 주세요.",
-  };
-  const calendarNotice = calendarNotices[calendarResult] ?? "";
-  const selectedSection = calendarNotice ? "schedule" : activeSection;
 
   const nextExamDate = dashboard?.schedules[0]?.exam_date;
 
@@ -206,19 +173,9 @@ export default function Home() {
       ) : null}
 
       <Tabs
-        value={selectedSection}
+        value={activeSection}
         onValueChange={(value) => {
-          if (value) {
-            setActiveSection(value as Section);
-            if (calendarNotice) {
-              window.history.replaceState(
-                window.history.state,
-                "",
-                window.location.pathname + window.location.hash,
-              );
-              window.dispatchEvent(new PopStateEvent("popstate"));
-            }
-          }
+          if (value) setActiveSection(value as Section);
         }}
         className="dashboard-tabs-root"
       >
@@ -243,10 +200,8 @@ export default function Home() {
           </TabsContent>
           <TabsContent value="schedule">
             <SchedulePanel
-              sessionId={sessionId}
               schedules={dashboard?.schedules ?? []}
               isLoading={!isHydrated}
-              callbackNotice={calendarNotice}
             />
           </TabsContent>
           <TabsContent value="profile">
@@ -523,130 +478,13 @@ function SettingRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function useGoogleCalendarConnection(sessionId: number | null) {
-  const [loadState, setLoadState] = useState<
-    | { sessionId: number; status: GoogleCalendarStatus }
-    | { sessionId: number; error: true }
-    | null
-  >(null);
-  const [messageState, setMessageState] = useState({ sessionId, message: "" });
-  const calendar =
-    loadState?.sessionId === sessionId && "status" in loadState ? loadState.status : null;
-  const isLoading = Boolean(sessionId && (!loadState || loadState.sessionId !== sessionId));
-  const message = messageState.sessionId === sessionId ? messageState.message : "";
-
-  function setMessage(value: string) {
-    setMessageState({ sessionId, message: value });
-  }
-
-  useEffect(() => {
-    let isCurrent = true;
-    if (!sessionId) return () => { isCurrent = false; };
-    getGoogleCalendarStatus(sessionId)
-      .then((value) => {
-        if (isCurrent) setLoadState({ sessionId, status: value });
-      })
-      .catch(() => {
-        if (isCurrent) {
-          setLoadState({ sessionId, error: true });
-          setMessageState({ sessionId, message: "연결 상태를 불러오지 못했습니다." });
-        }
-      });
-    return () => {
-      isCurrent = false;
-    };
-  }, [sessionId]);
-
-  async function connect() {
-    if (!sessionId) return;
-    setMessage("");
-    try {
-      if (calendar?.requires_reauthorization) {
-        await disconnectGoogleCalendar(sessionId);
-      }
-      const { authorization_url } = await connectGoogleCalendar(sessionId);
-      const authorization = new URL(authorization_url);
-      if (
-        authorization.protocol !== "https:" ||
-        authorization.hostname !== "accounts.google.com"
-      ) {
-        throw new Error("Google 인증 주소가 올바르지 않습니다.");
-      }
-      window.location.assign(authorization.href);
-    } catch (error) {
-      setMessage(calendarErrorMessage(error, "연결을 시작하지 못했습니다."));
-    }
-  }
-
-  async function disconnect() {
-    if (!sessionId) return;
-    setMessage("");
-    try {
-      const value = await disconnectGoogleCalendar(sessionId);
-      setLoadState({ sessionId, status: value });
-      setMessage("연결을 해제했습니다. 이미 추가된 일정은 Google Calendar에 남아 있습니다.");
-    } catch (error) {
-      setMessage(calendarErrorMessage(error, "연결을 해제하지 못했습니다."));
-    }
-  }
-
-  function requireReauthorization() {
-    setLoadState((current) =>
-      current?.sessionId === sessionId && "status" in current
-        ? {
-            sessionId,
-            status: {
-              ...current.status,
-              connected: false,
-              requires_reauthorization: true,
-            },
-          }
-        : current,
-    );
-  }
-
-  return { calendar, isLoading, message, setMessage, connect, disconnect, requireReauthorization };
-}
-
 function SchedulePanel({
-  sessionId,
   schedules,
   isLoading,
-  callbackNotice,
 }: {
-  sessionId: number | null;
   schedules: ScheduleResponse[];
   isLoading: boolean;
-  callbackNotice: string;
 }) {
-  const {
-    calendar,
-    isLoading: isLoadingCalendar,
-    message: calendarAction,
-    setMessage: setCalendarAction,
-    connect: beginCalendarConnection,
-    disconnect: endCalendarConnection,
-    requireReauthorization,
-  } = useGoogleCalendarConnection(sessionId);
-  const [syncingId, setSyncingId] = useState<number | null>(null);
-
-  async function syncSchedule(scheduleId: number) {
-    if (!sessionId) return;
-    setSyncingId(scheduleId);
-    setCalendarAction("");
-    try {
-      await syncScheduleToGoogleCalendar(sessionId, scheduleId);
-      setCalendarAction("시험 일정을 Google Calendar에 추가했습니다.");
-    } catch (error) {
-      setCalendarAction(calendarErrorMessage(error, "일정을 동기화하지 못했습니다."));
-      if (error instanceof ApiError && error.status === 409) {
-        requireReauthorization();
-      }
-    } finally {
-      setSyncingId(null);
-    }
-  }
-
   return (
     <section className="schedule-panel" aria-labelledby="schedule-title">
       <div className="panel-heading">
@@ -662,13 +500,6 @@ function SchedulePanel({
         </Badge>
       </div>
 
-      {callbackNotice ? (
-        <Alert className="schedule-alert" role="status">
-          <CalendarDays aria-hidden="true" />
-          <AlertDescription>{callbackNotice}</AlertDescription>
-        </Alert>
-      ) : null}
-
       <Card className="schedule-source-card">
         <CardContent className="schedule-source-content calendar-connection-content">
           <span className="source-icon" aria-hidden="true">
@@ -676,46 +507,11 @@ function SchedulePanel({
           </span>
           <div>
             <strong>Google Calendar</strong>
-            <p aria-live="polite">
-              {!sessionId
-                ? "프로필을 저장하면 이 브라우저의 비공개 세션에 연결할 수 있어요."
-                : isLoadingCalendar
-                ? "연결 상태를 확인하고 있습니다."
-                : calendar?.connected
-                  ? `${calendar.calendar_name ?? "전용 일정 캘린더"}에 연결됨`
-                  : calendar?.requires_reauthorization
-                    ? "권한이 만료됐습니다. 다시 연결해 주세요."
-                    : "이 브라우저의 비공개 세션에 전용 일정 캘린더를 연결합니다."}
-            </p>
-            {calendar?.connected ? (
-              <p className="calendar-connection-note">
-                연결 해제는 Google 계정의 Odal BIBI 권한을 회수합니다. 같은 계정을 쓰는 다른 세션도 다시 연결해야 할 수 있습니다.
-              </p>
-            ) : null}
+            <p>브라우저 저장소 모드에서는 계정 연결 정보를 안전하게 보관할 수 없어 사용할 수 없습니다.</p>
           </div>
-          {calendar?.connected ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={endCalendarConnection}
-              disabled={isLoadingCalendar}
-            >
-              연결 해제
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              onClick={beginCalendarConnection}
-              disabled={!sessionId || isLoadingCalendar}
-            >
-              {calendar?.requires_reauthorization ? "다시 연결" : "연결하기"}
-            </Button>
-          )}
+          <Badge variant="secondary" className="source-status">이번 배포 제외</Badge>
         </CardContent>
       </Card>
-      {calendarAction ? (
-        <p className="empty-copy" role="status">{calendarAction}</p>
-      ) : null}
 
       {isLoading ? (
         <div className="schedule-grid" aria-busy="true" aria-label="일정 불러오는 중">
@@ -746,16 +542,7 @@ function SchedulePanel({
                   </a>
                 ) : <span>출처 링크를 확인할 수 없습니다.</span>}
                 {schedule.source_verified ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => syncSchedule(schedule.id)}
-                    disabled={!calendar?.connected || syncingId === schedule.id}
-                  >
-                    {syncingId === schedule.id
-                      ? "동기화 중"
-                      : "Google Calendar에 추가"}
-                  </Button>
+                  <Badge variant="secondary">공식 출처 확인됨</Badge>
                 ) : null}
               </CardContent>
             </Card>;

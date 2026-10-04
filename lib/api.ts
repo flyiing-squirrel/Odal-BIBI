@@ -111,7 +111,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (init?.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await fetch(`/api/backend/api/v1/coaching/sessions${path}`, {
+  const response = await fetch(`/api/backend/api/v1/coaching/${path}`, {
     ...init,
     cache: "no-store",
     headers,
@@ -138,18 +138,18 @@ function sessionPath(sessionId: number): string {
 }
 
 export function createSession(input: CoachProfileInput): Promise<DashboardResponse> {
-  return request("", { method: "POST", body: JSON.stringify(input) });
+  return request("sessions", { method: "POST", body: JSON.stringify(input) });
 }
 
 export function getDashboard(sessionId: number): Promise<DashboardResponse> {
-  return request(sessionPath(sessionId));
+  return request(`sessions${sessionPath(sessionId)}`);
 }
 
 export function updateProfile(
   sessionId: number,
   patch: ProfileUpdate,
 ): Promise<DashboardResponse> {
-  return request(`${sessionPath(sessionId)}/profile`, {
+  return request(`sessions${sessionPath(sessionId)}/profile`, {
     method: "PATCH",
     body: JSON.stringify(patch),
   });
@@ -159,29 +159,44 @@ export function sendMessage(
   sessionId: number,
   message: string,
 ): Promise<ChatReplyResponse> {
-  return request(`${sessionPath(sessionId)}/messages`, {
+  return request(`sessions${sessionPath(sessionId)}/messages`, {
     method: "POST",
     body: JSON.stringify({ message }),
   });
 }
 
 export function getGoogleCalendarStatus(sessionId: number): Promise<GoogleCalendarStatus> {
-  return request(`${sessionPath(sessionId)}/calendar`);
+  return request(`sessions${sessionPath(sessionId)}/calendar`);
 }
 
 export function connectGoogleCalendar(sessionId: number): Promise<GoogleCalendarConnectResponse> {
-  return request(`${sessionPath(sessionId)}/calendar/connect`, { method: "POST" });
+  return request(`sessions${sessionPath(sessionId)}/calendar/connect`, { method: "POST" });
 }
 
 export function disconnectGoogleCalendar(sessionId: number): Promise<GoogleCalendarStatus> {
-  return request(`${sessionPath(sessionId)}/calendar`, { method: "DELETE" });
+  return request(`sessions${sessionPath(sessionId)}/calendar`, { method: "DELETE" });
 }
 
 export function syncScheduleToGoogleCalendar(
   sessionId: number,
   scheduleId: number,
 ): Promise<CalendarEventSyncResponse> {
-  return request(`${sessionPath(sessionId)}/calendar/schedules/${scheduleId}`, {
+  return request(`sessions${sessionPath(sessionId)}/calendar/schedules/${scheduleId}`, {
     method: "POST",
+  });
+}
+
+export function createBrowserDashboard(input: CoachProfileInput): Promise<DashboardResponse> {
+  return request("browser-session", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function sendBrowserMessage(
+  profile: CoachProfileInput,
+  conversation: ConversationMessageResponse[],
+  message: string,
+): Promise<ChatReplyResponse> {
+  return request("browser-session/messages", {
+    method: "POST",
+    body: JSON.stringify({ profile, conversation, message }),
   });
 }

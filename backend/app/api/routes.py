@@ -19,6 +19,7 @@ from app.providers.official_schedule import (
 )
 from app.providers.web_search import TavilySearchProvider
 from app.schemas import (
+    BrowserChatMessageCreate,
     CalendarEventSyncResponse,
     ChatMessageCreate,
     ChatReplyResponse,
@@ -100,6 +101,48 @@ def get_chat_service() -> ChatService:
 
 def not_found(error: LookupError) -> HTTPException:
     return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error))
+
+
+@router.post(
+    "/coaching/browser-session",
+    response_model=DashboardResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="브라우저 저장소용 추천 대시보드 생성",
+)
+def create_browser_session(
+    payload: CoachInput,
+    coaching_service: CoachingService = Depends(get_service),
+) -> DashboardResponse:
+    return coaching_service.create_browser_dashboard(payload.model_dump())
+
+
+@router.post(
+    "/coaching/browser-session/messages",
+    response_model=ChatReplyResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="브라우저 저장소용 대화 이어가기",
+)
+def post_browser_message(
+    payload: BrowserChatMessageCreate,
+    chat: ChatService = Depends(get_chat_service),
+) -> ChatReplyResponse:
+    try:
+        result = chat.reply_browser(
+            payload.profile.model_dump(),
+            [item.model_dump() for item in payload.conversation],
+            payload.message,
+        )
+    except ChatNotConfiguredError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+    except LLMError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+    return ChatReplyResponse(
+        session_id=1,
+        intent=result.intent,
+        user_message=result.user_message,
+        assistant_message=result.assistant_message,
+        notices=result.notices,
+    )
 
 
 @router.post(
