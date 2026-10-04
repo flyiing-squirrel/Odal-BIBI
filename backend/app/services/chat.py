@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -35,16 +36,32 @@ search_queries 규칙:
 
 오늘 날짜: {today}"""
 
-ANSWER_PROMPT = """너는 처음 자격증 준비를 시작하는 사람을 돕는 자격증 코치다. 한국어로 간결하게 답한다.
+ANSWER_PROMPT = """너는 처음 자격증 준비를 시작하는 사람을 돕는 자격증 코치다. 한국어로 답한다.
 
-규칙:
-1. 시험일정, 접수기간, 응시료, 응시자격, 강의·교재 가격 같은 사실은 [검색 결과]에 있는 내용만 말하고, 문장 끝에 출처 번호를 [1]처럼 붙인다.
-2. [검색 결과]에서 확인되지 않은 사실은 추측하지 말고 "미확인"이라고 쓴 뒤, 확인할 수 있는 공식 사이트를 안내한다.
+형식:
+- 핵심만 15줄 이내. 표·이모지·제목(#)은 쓰지 않고, 필요하면 짧은 목록만 쓴다.
+
+사실 규칙 (가장 중요):
+1. 날짜(시험일·접수기간·발표일), 금액(응시료·강의·교재 가격), 응시자격, 교재·강의·자료의 구체적 이름, URL은 [검색 결과]에 그대로 있는 것만 쓰고 문장 끝에 [1]처럼 출처 번호를 붙인다.
+2. [검색 결과]에 없는 위 항목은 "약", "보통" 같은 추정으로도 쓰지 않는다. "미확인"이라고 쓰고 주관기관 이름만 안내한다 (URL을 지어내지 않는다).
 3. 오늘 날짜 기준으로 이미 지난 회차는 "지난 회차"로 표시하고 다음 회차를 우선 안내한다.
 4. 뉴스·블로그 출처는 공식 근거가 아님을 밝힌다.
 5. [사용자 정보]의 희망직무·목표 시기·추천 결과에 맞춰 답한다.
 
 오늘 날짜: {today}"""
+
+# 검색 결과가 없을 때 질문 바로 앞에 붙이는 재확인 지시 (시스템 프롬프트만으로는 모델이 가격을 추정하는 경우가 있었음)
+NO_SOURCES_REMINDER = (
+    "[주의] 이번에는 검색 결과가 없다. 날짜·금액·교재/강의 이름·URL을 하나도 쓰지 말고, "
+    "학습 순서·방법 같은 일반적인 조언만 한다. 필요한 사실은 \"미확인 — 주관기관 공식 사이트에서 확인\"으로 쓴다."
+)
+
+# 검색 결과 없이 답할 때 나오면 안 되는 표현: 금액, 월 단위 날짜, 연 N회
+UNSOURCED_FACT_PATTERN = re.compile(
+    r"\d[\d,]*\s*(?:~\s*\d[\d,]*\s*)?(?:만\s*)?원"
+    r"|\d{1,2}\s*(?:~\s*\d{1,2}\s*)?월"
+    r"|연\s*\d+\s*(?:~\s*\d+\s*)?회"
+)
 
 
 class IntentResult(BaseModel):
@@ -84,9 +101,10 @@ class ChatService:
 
         intent = self._analyze(message, context, history)
         hits = self._search(intent, notices)
-        answer = self.client.complete(
-            self._answer_messages(message, context, history, intent, hits), max_tokens=1500
-        )
+        messages = self._answer_messages(message, context, history, intent, hits)
+        answer = self.client.complete(messages, max_tokens=1500)
+        if not hits:
+            answer = self._remove_unsourced_facts(messages, answer)
 
         user_message = ConversationMessage(session_id=session.id, role="user", content=message)
         assistant_message = ConversationMessage(
@@ -113,6 +131,27 @@ class ChatService:
             # 형식이 어긋나도 대화는 이어가도록 메시지 자체를 검색어로 쓴다
             logger.warning("의도 분석 결과 형식 오류: %s / raw=%s", error, raw)
             return IntentResult(intent="general", search_queries=[message[:100]])
+
+    def _remove_unsourced_facts(self, messages: list[dict], answer: str) -> str:
+        """검색 근거 없이 나온 금액·날짜를 한 번 다시 쓰게 하고, 그래도 남으면 해당 줄을 지운다."""
+        found = [m.group() for m in UNSOURCED_FACT_PATTERN.finditer(answer)]
+        if not found:
+            return answer
+        logger.warning("근거 없는 사실 표현 감지, 재작성 요청: %s", found)
+        retry = [
+            *messages,
+            {"role": "assistant", "content": answer},
+            {
+                "role": "user",
+                "content": f"검색 근거가 없는 표현이 있다: {', '.join(found)}. "
+                "이 표현이 들어간 내용을 빼고 같은 형식으로 답변 전체를 다시 써라.",
+            },
+        ]
+        answer = self.client.complete(retry, max_tokens=1500)
+        if UNSOURCED_FACT_PATTERN.search(answer):
+            logger.warning("재작성 후에도 근거 없는 표현이 남아 해당 줄 제거")
+            answer = "\n".join(line for line in answer.splitlines() if not UNSOURCED_FACT_PATTERN.search(line))
+        return answer
 
     def _search(self, intent: IntentResult, notices: list[str]) -> list[SearchHit]:
         if not intent.search_queries:
@@ -154,7 +193,8 @@ class ChatService:
             f"[사용자 정보]\n{context}\n\n"
             f"[요청 분석]\n의도: {intent.intent} / 자격증: {intent.certificate or '없음'}\n\n"
             f"[검색 결과]\n{format_hits(hits)}\n\n"
-            f"[질문]\n{message}"
+            + (f"{NO_SOURCES_REMINDER}\n\n" if not hits else "")
+            + f"[질문]\n{message}"
         )
         return [
             {"role": "system", "content": ANSWER_PROMPT.format(today=date.today().isoformat())},

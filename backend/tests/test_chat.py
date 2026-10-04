@@ -82,6 +82,7 @@ def test_message_searches_official_first_then_falls_back():
     # 응답 생성 프롬프트에 세션 프로필·추천 결과·검색 결과가 들어간다
     answer_prompt = llm.calls[-1]["messages"][-1]["content"]
     assert "백엔드 개발자" in answer_prompt and "1순위" in answer_prompt and "큐넷 시험일정" in answer_prompt
+    assert "[주의]" not in answer_prompt  # 검색 결과가 있으면 재확인 지시 없음
 
     conversation = client.get(f"/api/v1/coaching/sessions/{session_id}/conversation").json()["items"]
     assert [m["role"] for m in conversation] == ["user", "assistant", "user", "assistant"]
@@ -101,6 +102,8 @@ def test_message_without_search_provider_adds_notice():
 
     assert response.status_code == 201
     assert response.json()["notices"] == ["검색 기능이 아직 설정되지 않아 검색 없이 답변했어요."]
+    # 검색 결과가 없으면 날짜·금액·자료명을 쓰지 말라는 지시가 질문 앞에 붙는다
+    assert "[주의]" in llm.calls[-1]["messages"][-1]["content"]
 
 
 def test_message_without_groq_key_returns_503():
@@ -161,3 +164,46 @@ def test_groq_recommend_falls_back_on_error():
     result = GroqLLMProvider(FailingClient(), CATALOG, fallback=MockLLMProvider()).recommend(PROMPT)
     assert result.candidates[0].certification_code == "ADSP"  # mock 규칙 추천
     assert "기본 규칙으로 추천" in result.assistant_summary
+
+
+class ScriptedGroqClient(FakeGroqClient):
+    """complete()가 호출될 때마다 answers를 순서대로 반환."""
+
+    def __init__(self, intent: dict, answers: list[str]):
+        super().__init__(intent=intent)
+        self.answers = answers
+
+    def complete(self, messages, **kwargs):
+        self.calls.append({"messages": messages, "json": False})
+        return self.answers.pop(0)
+
+
+def ask_without_search(llm) -> dict:
+    app.dependency_overrides[get_chat_service] = lambda: ChatService(llm, None, history_limit=8)
+    try:
+        client = TestClient(app)
+        session_id = create_session(client)
+        response = client.post(f"/api/v1/coaching/sessions/{session_id}/messages", json={"message": "응시료?"})
+    finally:
+        app.dependency_overrides.pop(get_chat_service, None)
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_unsourced_price_is_rewritten():
+    llm = ScriptedGroqClient(
+        intent={"intent": "schedule", "search_queries": ["ADsP 응시료"]},
+        answers=["응시료는 보통 5~7만원이에요.", "미확인 — 주관기관 공식 사이트에서 확인하세요."],
+    )
+    body = ask_without_search(llm)
+    assert body["assistant_message"]["content"] == "미확인 — 주관기관 공식 사이트에서 확인하세요."
+    assert "5~7만원" in llm.calls[-1]["messages"][-1]["content"]  # 재작성 요청에 문제 표현 전달
+
+
+def test_unsourced_fact_lines_removed_when_rewrite_fails():
+    llm = ScriptedGroqClient(
+        intent={"intent": "schedule", "search_queries": ["ADsP 일정"]},
+        answers=["시험은 연 2회예요.\n공식 사이트에서 확인하세요.", "접수는 4~5월이에요.\n공식 사이트에서 확인하세요."],
+    )
+    body = ask_without_search(llm)
+    assert body["assistant_message"]["content"] == "공식 사이트에서 확인하세요."
