@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type RefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type RefObject,
+} from "react";
 import {
   ArrowRight,
   BookOpenCheck,
@@ -34,37 +40,14 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  type ConversationMessageResponse,
+  type RecommendationSummary,
+  type ScheduleResponse,
+} from "@/lib/api";
+import { useCoachingSession, type Profile } from "@/lib/use-coaching-session";
 
 type Section = "recommend" | "schedule" | "profile" | "chat";
-
-type Profile = {
-  career: string;
-  hours: string;
-  learningStyle: string;
-  budget: string;
-};
-
-type Message = {
-  id: string;
-  role: "coach" | "user";
-  text: string;
-};
-
-const PROFILE_KEY = "odal-bibi-profile";
-const CHAT_KEY = "odal-bibi-chat";
-
-const defaultProfile: Profile = {
-  career: "IT·데이터 분야",
-  hours: "주 6시간",
-  learningStyle: "문제 풀이 중심",
-  budget: "월 5만 원 이내",
-};
-
-const firstMessage: Message = {
-  id: "welcome",
-  role: "coach",
-  text: "안녕하세요. 자격증 준비를 한곳에서 정리해 볼게요. 추천이나 일정에 관해 궁금한 내용을 입력해 보세요.",
-};
 
 const sections: { id: Section; label: string; icon: typeof Compass }[] = [
   { id: "recommend", label: "추천", icon: Compass },
@@ -73,72 +56,52 @@ const sections: { id: Section; label: string; icon: typeof Compass }[] = [
   { id: "chat", label: "채팅", icon: MessageCircle },
 ];
 
+function formatDate(value: string): string {
+  return new Intl.DateTimeFormat("ko-KR", { dateStyle: "long" }).format(new Date(value));
+}
+
+function formatDateRange(start: string | null, end: string | null): string {
+  if (start && end) return `${formatDate(start)} ~ ${formatDate(end)}`;
+  if (start) return `${formatDate(start)}부터`;
+  if (end) return `${formatDate(end)}까지`;
+  return "미확인";
+}
+
+function safeHttpUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function Home() {
   const [activeSection, setActiveSection] = useState<Section>("recommend");
-  const [profile, setProfile] = useState<Profile>(defaultProfile);
-  const [messages, setMessages] = useState<Message[]>([firstMessage]);
-  const [isHydrated, setIsHydrated] = useState(false);
-  const [profileSaved, setProfileSaved] = useState(false);
-  const [draft, setDraft] = useState("");
+  const {
+    profile,
+    dashboard,
+    sessionId,
+    isHydrated,
+    isSavingProfile,
+    isSendingMessage,
+    profileSaved,
+    error,
+    chatNotices,
+    draft,
+    setDraft,
+    saveProfile,
+    sendMessage,
+    updateProfile,
+    retryLoad,
+  } = useCoachingSession();
   const messagesEndRef = useRef<HTMLLIElement>(null);
 
   useEffect(() => {
-    try {
-      const savedProfile = localStorage.getItem(PROFILE_KEY);
-      const savedChat = localStorage.getItem(CHAT_KEY);
-
-      if (savedProfile) {
-        const parsedProfile = JSON.parse(savedProfile) as Partial<Profile>;
-        // Browser storage must be read after SSR to keep the first render consistent.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setProfile({ ...defaultProfile, ...parsedProfile });
-        setProfileSaved(true);
-      }
-
-      if (savedChat) {
-        const parsedChat = JSON.parse(savedChat) as Message[];
-        if (Array.isArray(parsedChat) && parsedChat.length > 0) {
-          setMessages(parsedChat);
-        }
-      }
-    } catch {
-      // Ignore invalid local data and keep the sample profile.
-    } finally {
-      setIsHydrated(true);
-    }
-  }, []);
-
-  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [dashboard?.conversation]);
 
-  function saveProfile(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
-    setProfileSaved(true);
-  }
-
-  function sendMessage(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-
-    const answer = getDemoReply(trimmed, profile);
-    setMessages((current) => [
-      ...current,
-      { id: crypto.randomUUID(), role: "user", text: trimmed },
-      { id: crypto.randomUUID(), role: "coach", text: answer },
-    ]);
-    setDraft("");
-  }
-
-  function updateProfile(key: keyof Profile, value: string) {
-    setProfile((current) => ({ ...current, [key]: value }));
-    setProfileSaved(false);
-  }
-
-  useEffect(() => {
-    if (isHydrated) localStorage.setItem(CHAT_KEY, JSON.stringify(messages));
-  }, [isHydrated, messages]);
+  const nextExamDate = dashboard?.schedules[0]?.exam_date;
 
   return (
     <main className="app-shell">
@@ -152,8 +115,8 @@ export default function Home() {
             <span className="brand-caption">자격증 준비 대시보드</span>
           </span>
         </a>
-        <Badge variant="outline" className="demo-badge">
-          화면 데모
+        <Badge variant="outline" className="session-badge">
+          {sessionId ? "비공개 세션" : "새 코칭 세션"}
         </Badge>
       </header>
 
@@ -167,9 +130,9 @@ export default function Home() {
         </div>
         <Button
           className="welcome-action"
-          onClick={() => setActiveSection("chat")}
+          onClick={() => setActiveSection(sessionId && dashboard ? "chat" : "profile")}
         >
-          코치에게 질문하기
+          {sessionId && dashboard ? "코치에게 질문하기" : "프로필 설정 시작"}
           <ArrowRight aria-hidden="true" />
         </Button>
       </section>
@@ -184,7 +147,7 @@ export default function Home() {
         <SummaryCard
           icon={CalendarDays}
           label="시험 일정"
-          value="공식 일정 연결 전"
+          value={nextExamDate ? formatDate(nextExamDate) : "공식 일정 확인 대기"}
           tone="ocean"
         />
         <SummaryCard
@@ -194,6 +157,20 @@ export default function Home() {
           tone="forest"
         />
       </section>
+
+      {error ? (
+        <Alert className="dashboard-alert" role="alert">
+          <AlertTitle>요청을 처리하지 못했어요.</AlertTitle>
+          <AlertDescription className="dashboard-alert-content">
+            <span>{error}</span>
+            {sessionId && !dashboard ? (
+              <Button variant="outline" size="sm" onClick={retryLoad}>
+                다시 불러오기
+              </Button>
+            ) : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       <Tabs
         value={activeSection}
@@ -215,18 +192,24 @@ export default function Home() {
           <TabsContent value="recommend">
             <RecommendationPanel
               profile={profile}
+              recommendations={dashboard?.recommendations ?? []}
+              isLoading={!isHydrated}
               onShowSchedule={() => setActiveSection("schedule")}
               onEditProfile={() => setActiveSection("profile")}
             />
           </TabsContent>
           <TabsContent value="schedule">
-            <SchedulePanel />
+            <SchedulePanel
+              schedules={dashboard?.schedules ?? []}
+              isLoading={!isHydrated}
+            />
           </TabsContent>
           <TabsContent value="profile">
             <ProfilePanel
               profile={profile}
               isHydrated={isHydrated}
               isSaved={profileSaved}
+              isSaving={isSavingProfile}
               onChange={updateProfile}
               onSubmit={saveProfile}
             />
@@ -234,8 +217,11 @@ export default function Home() {
           <TabsContent value="chat">
             <ChatPanel
               draft={draft}
-              messages={messages}
+              messages={dashboard?.conversation ?? []}
               messagesEndRef={messagesEndRef}
+              hasSession={Boolean(sessionId && dashboard)}
+              isSending={isSendingMessage}
+              notices={chatNotices}
               onDraftChange={setDraft}
               onSend={sendMessage}
             />
@@ -245,7 +231,7 @@ export default function Home() {
 
       <footer className="page-footer">
         <span>Odal BIBI</span>
-        <span>화면 예시 데이터 · 실제 추천 및 일정 연동 전</span>
+        <span>공식 출처로 확인된 일정과 세션별 코칭 결과를 표시합니다.</span>
       </footer>
     </main>
   );
@@ -279,13 +265,24 @@ function SummaryCard({
 
 function RecommendationPanel({
   profile,
+  recommendations,
+  isLoading,
   onShowSchedule,
   onEditProfile,
 }: {
   profile: Profile;
+  recommendations: RecommendationSummary[];
+  isLoading: boolean;
   onShowSchedule: () => void;
   onEditProfile: () => void;
 }) {
+  const [featured, ...alternatives] = recommendations;
+  const officialUrl = featured ? safeHttpUrl(featured.certification.official_url) : null;
+  const completion = [profile.career, profile.hours, profile.learningStyle, profile.budget].filter(
+    (value) => value.trim(),
+  ).length;
+  const completionPercent = Math.round((completion / 4) * 100);
+
   return (
     <div className="panel-grid">
       <section className="main-column" aria-labelledby="recommend-title">
@@ -294,58 +291,80 @@ function RecommendationPanel({
             <p className="eyebrow">YOUR NEXT STEP</p>
             <h2 id="recommend-title">나에게 맞는 자격증 추천</h2>
           </div>
-          <Badge className="sample-badge" variant="secondary">
-            예시 프로필 기준
+          <Badge className="recommendation-count-badge" variant="secondary">
+            {recommendations.length ? `${recommendations.length}개 추천` : "프로필 기반 추천"}
           </Badge>
         </div>
 
-        <Card className="featured-card">
-          <CardContent className="featured-card-content">
-            <div className="featured-topline">
-              <Badge className="rank-badge">1순위 추천</Badge>
-              <span className="match-copy">
-                <CheckCircle2 size={16} aria-hidden="true" />
-                조건을 바탕으로 살펴볼 후보
-              </span>
-            </div>
-            <div className="featured-body">
-              <div>
-                <p className="cert-category">IT · 데이터</p>
-                <h3>정보처리기사</h3>
-                <p className="featured-description">
-                  {profile.career || "관심 분야"} 준비를 시작할 때 기초 역량을
-                  정리하기 좋은 자격증 예시입니다.
-                </p>
+        {isLoading ? (
+          <Card className="featured-card" aria-busy="true" aria-label="추천을 불러오는 중">
+            <CardContent className="featured-card-content">
+              <Skeleton className="skeleton-field" />
+              <Skeleton className="skeleton-field" />
+              <Skeleton className="skeleton-field" />
+            </CardContent>
+          </Card>
+        ) : featured ? (
+          <Card className="featured-card">
+            <CardContent className="featured-card-content">
+              <div className="featured-topline">
+                <Badge className="rank-badge">{featured.rank}순위 추천</Badge>
+                <span className="match-copy">
+                  <CheckCircle2 size={16} aria-hidden="true" />
+                  적합도 {Math.round(featured.match_score)}점
+                </span>
               </div>
-              <span className="featured-emblem" aria-hidden="true">
-                <BookOpenCheck size={30} strokeWidth={1.5} />
-              </span>
-            </div>
-            <div className="profile-context">
-              <div>
-                <span>학습 시간</span>
-                <strong>{profile.hours || "미입력"}</strong>
+              <div className="featured-body">
+                <div>
+                  <p className="cert-category">{featured.certification.issuer}</p>
+                  <h3>{featured.certification.name}</h3>
+                  <p className="featured-description">{featured.reason}</p>
+                </div>
+                <span className="featured-emblem" aria-hidden="true">
+                  <BookOpenCheck size={30} strokeWidth={1.5} />
+                </span>
               </div>
-              <div>
-                <span>학습 방식</span>
-                <strong>{profile.learningStyle || "미입력"}</strong>
+              <p className="featured-description">{featured.study_plan_hint}</p>
+              <div className="profile-context">
+                <div>
+                  <span>관심 분야</span>
+                  <strong>{profile.career || "미입력"}</strong>
+                </div>
+                <div>
+                  <span>학습 시간</span>
+                  <strong>{profile.hours || "미입력"}</strong>
+                </div>
+                <div>
+                  <span>학습 방식</span>
+                  <strong>{profile.learningStyle || "미입력"}</strong>
+                </div>
               </div>
-              <div>
-                <span>비용 기준</span>
-                <strong>{profile.budget || "미입력"}</strong>
+              <div className="featured-actions">
+                <Button onClick={onShowSchedule}>
+                  시험 일정 보기
+                  <ArrowRight aria-hidden="true" />
+                </Button>
+                <Button variant="outline" onClick={onEditProfile}>
+                  프로필 조정
+                </Button>
+                {officialUrl ? (
+                  <a href={officialUrl} target="_blank" rel="noopener noreferrer">공식 정보</a>
+                ) : null}
               </div>
-            </div>
-            <div className="featured-actions">
-              <Button onClick={onShowSchedule}>
-                시험 일정 보기
-                <ArrowRight aria-hidden="true" />
-              </Button>
-              <Button variant="outline" onClick={onEditProfile}>
-                프로필 조정
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        ) : (
+          <Alert className="recommend-empty" role="status">
+            <Compass aria-hidden="true" />
+            <AlertTitle>{profile.career ? "추천 결과가 없습니다." : "먼저 관심 분야를 알려주세요."}</AlertTitle>
+            <AlertDescription>
+              {profile.career
+                ? "프로필을 다시 저장해 추천을 새로 받아보세요."
+                : "프로필을 저장하면 그 정보를 바탕으로 추천을 만들어요."}
+            </AlertDescription>
+            <Button variant="outline" onClick={onEditProfile}>프로필 입력하기</Button>
+          </Alert>
+        )}
 
         <Card className="alternatives-card">
           <CardHeader className="compact-card-header">
@@ -355,18 +374,15 @@ function RecommendationPanel({
             </div>
           </CardHeader>
           <CardContent className="alternative-list">
-            <AlternativeRow
-              initials="SQL"
-              title="SQLD"
-              detail="데이터베이스 기초를 다지고 싶다면"
-              tint="ocean"
-            />
-            <AlternativeRow
-              initials="AD"
-              title="ADsP"
-              detail="데이터 분석의 전체 흐름을 익히고 싶다면"
-              tint="forest"
-            />
+            {alternatives.length ? alternatives.map((item, index) => (
+              <AlternativeRow
+                key={item.id}
+                initials={item.certification.name.slice(0, 3)}
+                title={item.certification.name}
+                detail={item.reason}
+                tint={index % 2 === 0 ? "ocean" : "forest"}
+              />
+            )) : <p className="empty-copy">다른 추천 후보는 프로필 저장 후 확인할 수 있어요.</p>}
           </CardContent>
         </Card>
       </section>
@@ -377,7 +393,7 @@ function RecommendationPanel({
             <div className="card-heading-line">
               <div>
                 <CardTitle>현재 설정</CardTitle>
-                <CardDescription>프로필에 맞춰 추천을 정리해요.</CardDescription>
+            <CardDescription>프로필에 맞춰 추천을 정리해요.</CardDescription>
               </div>
               <UserRound className="muted-icon" aria-hidden="true" />
             </div>
@@ -386,6 +402,7 @@ function RecommendationPanel({
             <SettingRow label="관심 분야" value={profile.career || "미입력"} />
             <SettingRow label="학습 가능 시간" value={profile.hours || "미입력"} />
             <SettingRow label="학습 방식" value={profile.learningStyle || "미입력"} />
+            <SettingRow label="월 예산" value={profile.budget || "미입력"} />
           </CardContent>
           <div className="side-card-action">
             <Button variant="ghost" size="sm" onClick={onEditProfile}>
@@ -407,9 +424,9 @@ function RecommendationPanel({
               </div>
               <span className="progress-value">1 / 3</span>
             </div>
-            <Progress value={33} aria-label="첫 준비 단계 진행률 33%" />
+            <Progress value={completionPercent} aria-label={`프로필 입력 ${completionPercent}% 완료`} />
             <p className="progress-caption">
-              관심 분야와 공부 시간을 입력하면 다음 단계로 넘어갈 수 있어요.
+              관심 분야와 학습 여건을 입력하면 추천을 더 구체적으로 만들 수 있어요.
             </p>
             <Button variant="outline" className="full-button" onClick={onEditProfile}>
               프로필 완성하기
@@ -418,7 +435,7 @@ function RecommendationPanel({
         </Card>
 
         <p className="source-note">
-          추천과 시험 일정은 실제 데이터 연결 전의 화면 예시입니다.
+          추천은 저장된 프로필을 기준으로 갱신됩니다. 확인되지 않은 일정은 표시하지 않습니다.
         </p>
       </aside>
     </div>
@@ -461,7 +478,13 @@ function SettingRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SchedulePanel() {
+function SchedulePanel({
+  schedules,
+  isLoading,
+}: {
+  schedules: ScheduleResponse[];
+  isLoading: boolean;
+}) {
   return (
     <section className="schedule-panel" aria-labelledby="schedule-title">
       <div className="panel-heading">
@@ -473,39 +496,67 @@ function SchedulePanel() {
           </p>
         </div>
         <Badge className="schedule-badge" variant="outline">
-          일정 데이터 연결 전
+          {isLoading ? "일정 불러오는 중" : schedules.length ? `${schedules.length}개 공식 일정` : "공식 일정 확인 대기"}
         </Badge>
       </div>
 
-      <Alert className="schedule-alert">
-        <CalendarDays aria-hidden="true" />
-        <AlertTitle>공식 시험 일정은 아직 표시하지 않습니다.</AlertTitle>
-        <AlertDescription>
-          현재 화면은 디자인 데모이며, 실제 일정은 주관 기관의 공식 정보 연동 후
-          확인 날짜와 함께 제공할 예정입니다.
-        </AlertDescription>
-      </Alert>
+      <Card className="schedule-source-card">
+        <CardContent className="schedule-source-content calendar-connection-content">
+          <span className="source-icon" aria-hidden="true">
+            <CalendarDays size={19} />
+          </span>
+          <div>
+            <strong>Google Calendar</strong>
+            <p>브라우저 저장소 모드에서는 계정 연결 정보를 안전하게 보관할 수 없어 사용할 수 없습니다.</p>
+          </div>
+          <Badge variant="secondary" className="source-status">이번 배포 제외</Badge>
+        </CardContent>
+      </Card>
 
-      <div className="schedule-grid">
-        <ScheduleStep
-          number="01"
-          title="원서 접수"
-          detail="공식 일정 확인 후 표시"
-          icon={FileCheck2}
-        />
-        <ScheduleStep
-          number="02"
-          title="시험일"
-          detail="공식 일정 확인 후 표시"
-          icon={CalendarDays}
-        />
-        <ScheduleStep
-          number="03"
-          title="합격자 발표"
-          detail="공식 일정 확인 후 표시"
-          icon={CheckCircle2}
-        />
-      </div>
+      {isLoading ? (
+        <div className="schedule-grid" aria-busy="true" aria-label="일정 불러오는 중">
+          <Skeleton className="skeleton-field" />
+          <Skeleton className="skeleton-field" />
+        </div>
+      ) : schedules.length ? (
+        <div className="schedule-grid">
+          {schedules.map((schedule) => {
+            const sourceUrl = safeHttpUrl(schedule.source_url);
+            return <Card className="schedule-step" key={schedule.id}>
+              <CardContent className="schedule-step-content">
+                <div className="schedule-step-top">
+                  <span className="step-number">{formatDate(schedule.exam_date)}</span>
+                  <CalendarDays className="muted-icon" aria-hidden="true" />
+                </div>
+                <h3>{schedule.exam_name}</h3>
+                <p>{schedule.certification.name}</p>
+                <div className="schedule-dates">
+                  <span>접수 {formatDateRange(schedule.registration_start, schedule.registration_end)}</span>
+                  <span>발표 {schedule.result_date ? formatDate(schedule.result_date) : "미확인"}</span>
+                </div>
+                {schedule.details ? <p>{schedule.details}</p> : null}
+                <span className="schedule-checked-at">확인 {formatDate(schedule.fetched_at)}</span>
+                {sourceUrl ? (
+                  <a href={sourceUrl} target="_blank" rel="noopener noreferrer">
+                    {schedule.source_name}에서 확인
+                  </a>
+                ) : <span>출처 링크를 확인할 수 없습니다.</span>}
+                {schedule.source_verified ? (
+                  <Badge variant="secondary">공식 출처 확인됨</Badge>
+                ) : null}
+              </CardContent>
+            </Card>;
+          })}
+        </div>
+      ) : (
+        <Alert className="schedule-alert" role="status">
+          <CalendarDays aria-hidden="true" />
+          <AlertTitle>확인된 공식 일정이 없습니다.</AlertTitle>
+          <AlertDescription>
+            주관 기관에서 확인된 일정이 들어오면 접수 기간과 시험일을 표시합니다. 확인 전인 날짜는 예상값으로 채우지 않습니다.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Card className="schedule-source-card">
         <CardContent className="schedule-source-content">
@@ -514,10 +565,10 @@ function SchedulePanel() {
           </span>
           <div>
             <strong>일정은 공식 원문으로 확인해요.</strong>
-            <p>확정되지 않은 날짜는 표시하지 않고, 출처와 확인 시점을 함께 보여줍니다.</p>
+            <p>출처와 확인 시점이 있는 일정만 표시합니다.</p>
           </div>
           <Badge variant="secondary" className="source-status">
-            준비 중
+            {schedules.length ? "출처 연결됨" : "확인 대기"}
           </Badge>
         </CardContent>
       </Card>
@@ -525,44 +576,18 @@ function SchedulePanel() {
   );
 }
 
-function ScheduleStep({
-  number,
-  title,
-  detail,
-  icon: Icon,
-}: {
-  number: string;
-  title: string;
-  detail: string;
-  icon: typeof CalendarDays;
-}) {
-  return (
-    <Card className="schedule-step">
-      <CardContent className="schedule-step-content">
-        <div className="schedule-step-top">
-          <span className="step-number">{number}</span>
-          <Icon className="muted-icon" aria-hidden="true" />
-        </div>
-        <h3>{title}</h3>
-        <p>{detail}</p>
-        <span className="pending-label">
-          <span aria-hidden="true" /> 확인 대기
-        </span>
-      </CardContent>
-    </Card>
-  );
-}
-
 function ProfilePanel({
   profile,
   isHydrated,
   isSaved,
+  isSaving,
   onChange,
   onSubmit,
 }: {
   profile: Profile;
   isHydrated: boolean;
   isSaved: boolean;
+  isSaving: boolean;
   onChange: (key: keyof Profile, value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -573,11 +598,11 @@ function ProfilePanel({
           <p className="eyebrow">YOUR PROFILE</p>
           <h2 id="profile-title">나에게 맞게 설정하기</h2>
           <p className="panel-subtitle">
-            입력한 내용은 이 브라우저에만 저장됩니다.
+            입력 내용은 비공개 코칭 세션에 저장됩니다.
           </p>
         </div>
-        <Badge variant="secondary" className="local-badge">
-          <Check size={14} aria-hidden="true" /> 브라우저 저장
+        <Badge variant="secondary" className="session-status-badge">
+          <Check size={14} aria-hidden="true" /> {isSaved ? "세션 저장됨" : "저장 전"}
         </Badge>
       </div>
 
@@ -605,6 +630,8 @@ function ProfilePanel({
                     value={profile.career}
                     onChange={(event) => onChange("career", event.target.value)}
                     placeholder="예: 데이터 분석, 개발"
+                    required
+                    maxLength={200}
                   />
                 </label>
                 <label className="field-group" htmlFor="hours">
@@ -614,6 +641,7 @@ function ProfilePanel({
                     value={profile.hours}
                     onChange={(event) => onChange("hours", event.target.value)}
                     placeholder="예: 주 6시간"
+                    maxLength={100}
                   />
                 </label>
                 <label className="field-group" htmlFor="learning-style">
@@ -624,6 +652,7 @@ function ProfilePanel({
                     value={profile.learningStyle}
                     onChange={(event) => onChange("learningStyle", event.target.value)}
                   >
+                    <option value="">선택 안 함</option>
                     <option>문제 풀이 중심</option>
                     <option>개념 강의 중심</option>
                     <option>독학 중심</option>
@@ -637,19 +666,20 @@ function ProfilePanel({
                     value={profile.budget}
                     onChange={(event) => onChange("budget", event.target.value)}
                     placeholder="예: 무료 우선, 월 5만 원 이내"
+                    maxLength={100}
                   />
                 </label>
                 <div className="profile-form-footer">
                   {isSaved ? (
                     <p className="saved-status" role="status">
-                      <CheckCircle2 size={16} aria-hidden="true" /> 저장했어요.
+                      <CheckCircle2 size={16} aria-hidden="true" /> 저장된 프로필입니다.
                     </p>
                   ) : (
-                    <p className="privacy-note">저장하기 전에는 브라우저에 기록되지 않아요.</p>
+                    <p className="privacy-note">세션 토큰은 보호된 쿠키로 보관됩니다.</p>
                   )}
-                  <Button type="submit">
-                    프로필 저장
-                    <Check aria-hidden="true" />
+                  <Button type="submit" disabled={isSaving}>
+                    {isSaving ? "저장 중..." : isSaved ? "변경사항 저장" : "프로필 저장 및 추천 보기"}
+                    {isSaving ? <Clock3 aria-hidden="true" /> : <Check aria-hidden="true" />}
                   </Button>
                 </div>
               </form>
@@ -662,19 +692,20 @@ function ProfilePanel({
             <span className="profile-preview-icon" aria-hidden="true">
               <UserRound size={22} />
             </span>
-            <p className="eyebrow">PREVIEW</p>
+            <p className="eyebrow">YOUR SETTINGS</p>
             <h3>이 정보로 추천을 정리해요.</h3>
             <p className="profile-preview-copy">
-              관심 분야와 공부 시간, 비용 기준을 바탕으로 후보를 비교하는 화면입니다.
+              관심 분야와 학습 여건에 따라 저장된 추천을 다시 계산합니다.
             </p>
             <div className="preview-values">
               <SettingRow label="관심 분야" value={profile.career || "아직 입력 전"} />
               <SettingRow label="공부 시간" value={profile.hours || "아직 입력 전"} />
+              <SettingRow label="학습 방식" value={profile.learningStyle || "아직 입력 전"} />
               <SettingRow label="월 예산" value={profile.budget || "아직 입력 전"} />
             </div>
             <div className="local-data-note">
               <WalletCards size={16} aria-hidden="true" />
-              <span>계정·서버 동기화는 아직 연결되지 않았습니다.</span>
+              <span>브라우저에는 세션 ID만 저장하고, 프로필은 서버에 보관합니다.</span>
             </div>
           </CardContent>
         </Card>
@@ -687,12 +718,18 @@ function ChatPanel({
   draft,
   messages,
   messagesEndRef,
+  hasSession,
+  isSending,
+  notices,
   onDraftChange,
   onSend,
 }: {
   draft: string;
-  messages: Message[];
+  messages: ConversationMessageResponse[];
   messagesEndRef: RefObject<HTMLLIElement | null>;
+  hasSession: boolean;
+  isSending: boolean;
+  notices: string[];
   onDraftChange: (value: string) => void;
   onSend: (text: string) => void;
 }) {
@@ -709,8 +746,8 @@ function ChatPanel({
           <h2 id="chat-title">무엇이 궁금하세요?</h2>
           <p className="panel-subtitle">추천이나 일정에 관해 질문을 남겨보세요.</p>
         </div>
-        <Badge variant="outline" className="chat-demo-badge">
-          데모 응답
+        <Badge variant="outline" className="chat-session-badge">
+          {hasSession ? "비공개 대화" : "세션 시작 필요"}
         </Badge>
       </div>
 
@@ -724,29 +761,53 @@ function ChatPanel({
             <span>자격증 준비 도우미</span>
           </div>
           <span className="online-indicator">
-            <span aria-hidden="true" /> 화면 미리보기
+            <span aria-hidden="true" /> {hasSession ? "세션 연결됨" : "프로필 저장 후 시작"}
           </span>
         </div>
 
         <ol className="chat-thread" aria-label="대화 내역" aria-live="polite">
-          {messages.map((message) => (
-            <li
-              key={message.id}
-              className={`chat-message ${message.role === "user" ? "user-message" : "coach-message"}`}
-            >
-              <span className="message-author">
-                {message.role === "user" ? "나" : "코치"}
-              </span>
-              <p>{message.text}</p>
-            </li>
-          ))}
+          {messages.length ? messages.map((message) => (
+              <li
+                key={message.id}
+                className={`chat-message ${message.role === "user" ? "user-message" : "coach-message"}`}
+              >
+                <span className="message-author">
+                  {message.role === "user" ? "나" : message.role === "system" ? "안내" : "코치"}
+                </span>
+                <p>{message.content}</p>
+                {message.sources.length ? (
+                  <ul className="message-sources" aria-label="답변 출처">
+                    {message.sources.map((source) => {
+                      const href = safeHttpUrl(source.url);
+                      return href ? (
+                        <li key={`${message.id}-${href}`}>
+                          <a href={href} target="_blank" rel="noopener noreferrer">{source.title}</a>
+                        </li>
+                      ) : null;
+                    })}
+                  </ul>
+                ) : null}
+              </li>
+            )) : (
+              <li className="chat-empty" role="status">
+                {hasSession ? "첫 질문을 보내면 여기에서 대화를 이어갈 수 있어요." : "프로필을 저장하면 코치와 대화할 수 있어요."}
+              </li>
+            )}
+          {isSending ? <li className="chat-message coach-message" role="status">답변을 준비하고 있어요...</li> : null}
           <li ref={messagesEndRef} className="message-end" aria-hidden="true" />
         </ol>
+
+        {notices.length ? (
+          <Alert className="chat-notices" role="status">
+            <AlertDescription>{notices.join(" ")}</AlertDescription>
+          </Alert>
+        ) : null}
 
         <div className="prompt-chips" aria-label="추천 질문">
           <Button
             variant="outline"
             size="sm"
+            disabled={!hasSession || isSending}
             onClick={() => onSend("IT 분야 자격증을 추천해줘")}
           >
             IT 분야 자격증 추천
@@ -754,6 +815,7 @@ function ChatPanel({
           <Button
             variant="outline"
             size="sm"
+            disabled={!hasSession || isSending}
             onClick={() => onSend("시험 일정은 어디서 확인해?")}
           >
             시험 일정 확인
@@ -768,30 +830,22 @@ function ChatPanel({
             aria-label="코치에게 보낼 메시지"
             rows={1}
             className="chat-input"
+            disabled={!hasSession || isSending}
+            maxLength={2000}
           />
           <Button
             type="submit"
             size="icon"
             aria-label="메시지 보내기"
-            disabled={!draft.trim()}
+            disabled={!draft.trim() || !hasSession || isSending}
           >
             <Send aria-hidden="true" />
           </Button>
         </form>
         <p className="chat-disclaimer">
-          현재 채팅은 화면 시연용 답변을 사용하며 외부 AI와 연결되지 않습니다.
+          날짜·비용 등 사실 정보는 출처를 확인하고, 근거가 없으면 미확인으로 안내합니다.
         </p>
       </Card>
     </section>
   );
-}
-
-function getDemoReply(text: string, profile: Profile) {
-  if (/일정|시험|접수/.test(text)) {
-    return "공식 시험 일정은 아직 연결되지 않았어요. 일정 탭에서 어떤 정보가 표시될지 미리 확인할 수 있습니다.";
-  }
-  if (/프로필|시간|예산|비용/.test(text)) {
-    return `현재 예시 프로필은 ${profile.career || "관심 분야 미입력"}, ${profile.hours || "공부 시간 미입력"} 기준이에요. 프로필 탭에서 조건을 바꾸고 저장할 수 있습니다.`;
-  }
-  return `현재 화면은 ${profile.career || "관심 분야"} 기준의 추천 예시를 보여줍니다. 실제 추천 기능은 다음 단계에서 연결할 수 있어요.`;
 }

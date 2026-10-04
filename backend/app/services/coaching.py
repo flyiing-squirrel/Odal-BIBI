@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+from urllib.parse import urlsplit
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -5,13 +8,16 @@ from app.models import (
     Certification,
     CertificationRecommendation,
     CertificationSchedule,
-    ConversationMessage,
     CoachingSession,
+    ConversationMessage,
 )
-from app.core.security import hash_value, new_session_token
-from app.providers.base import CoachingPrompt, LLMProvider, ScheduleProvider
-from app.schemas import DashboardResponse, SessionCreatedResponse
-
+from app.providers.base import (
+    CoachingPrompt,
+    LLMProvider,
+    LLMRecommendationResult,
+    ScheduleProvider,
+)
+from app.schemas import DashboardResponse
 
 CATALOG = [
     {
@@ -64,56 +70,140 @@ class CoachingService:
         self.llm_provider = llm_provider
         self.schedule_provider = schedule_provider
 
-    def ensure_catalog(self, db: Session) -> None:
-        existing_codes = set(db.scalars(select(Certification.code)).all())
-        for item in CATALOG:
-            if item["code"] not in existing_codes:
-                db.add(Certification(**item))
-        db.commit()
-
     def create_session(
         self,
         db: Session,
-        desired_job: str,
-        major_experience: str | None,
-        owned_certifications: list[str],
-        target_acquisition_period: str,
-        client_ip_hash: str | None = None,
-    ) -> SessionCreatedResponse:
-        self.ensure_catalog(db)
-        access_token = new_session_token()
+        session_token_hash: str,
+        *,
+        interest_area: str,
+        weekly_study_hours: str | None = None,
+        learning_style: str | None = None,
+        monthly_budget: str | None = None,
+        desired_job: str | None = None,
+        major_experience: str | None = None,
+        owned_certifications: list[str] | None = None,
+        target_acquisition_period: str | None = None,
+    ) -> DashboardResponse:
         session = CoachingSession(
+            interest_area=interest_area,
+            weekly_study_hours=weekly_study_hours,
+            learning_style=learning_style,
+            monthly_budget=monthly_budget,
             desired_job=desired_job,
             major_experience=major_experience,
             owned_certifications=owned_certifications,
             target_acquisition_period=target_acquisition_period,
-            access_token_hash=hash_value(access_token),
-            client_ip_hash=client_ip_hash,
+            session_token_hash=session_token_hash,
         )
         db.add(session)
         db.flush()
 
-        prompt = CoachingPrompt(
-            desired_job=desired_job,
-            major_experience=major_experience,
-            owned_certifications=owned_certifications,
-            target_acquisition_period=target_acquisition_period,
-        )
-        result = self.llm_provider.recommend(prompt)
+        result = self.llm_provider.recommend(self._prompt_for(session))
         db.add(
             ConversationMessage(
                 session_id=session.id,
                 role="user",
-                content=(
-                    f"희망직무: {desired_job}\n"
-                    f"전공 관련 경험: {major_experience or '입력 없음'}\n"
-                    f"보유 자격증: {', '.join(owned_certifications) or '없음'}\n"
-                    f"목표 취득 시기: {target_acquisition_period}"
-                ),
+                content=self._profile_summary(session),
             )
         )
         db.add(ConversationMessage(session_id=session.id, role="assistant", content=result.assistant_summary))
+        self._store_recommendations(db, session, result)
 
+        db.commit()
+        return self.get_dashboard(db, session.id)
+
+    def create_browser_dashboard(self, profile: dict) -> DashboardResponse:
+        """Build a dashboard response without persisting a server-side session."""
+        prompt = CoachingPrompt(
+            desired_job=profile.get("desired_job"),
+            major_experience=profile.get("major_experience"),
+            owned_certifications=profile.get("owned_certifications") or [],
+            target_acquisition_period=profile.get("target_acquisition_period"),
+            interest_area=profile["interest_area"],
+            weekly_study_hours=profile.get("weekly_study_hours"),
+            learning_style=profile.get("learning_style"),
+            monthly_budget=profile.get("monthly_budget"),
+        )
+        result = self.llm_provider.recommend(prompt)
+        catalog_by_code = {item["code"]: item for item in CATALOG}
+        created_at = datetime.now(UTC)
+        recommendations = []
+        for candidate in result.candidates:
+            certification = catalog_by_code.get(candidate.certification_code)
+            if certification is None:
+                continue
+            recommendations.append(
+                {
+                    "id": candidate.rank,
+                    "rank": candidate.rank,
+                    "match_score": candidate.match_score,
+                    "priority": candidate.priority,
+                    "reason": candidate.reason,
+                    "study_plan_hint": candidate.study_plan_hint,
+                    "certification": {"id": candidate.rank, **certification},
+                }
+            )
+
+        return DashboardResponse.model_validate(
+            {
+                "session": {"id": 1, "created_at": created_at, **profile},
+                "recommendations": recommendations,
+                "conversation": [
+                    {
+                        "id": 1,
+                        "role": "user",
+                        "content": self._browser_profile_summary(profile),
+                        "sources": [],
+                        "created_at": created_at,
+                    },
+                    {
+                        "id": 2,
+                        "role": "assistant",
+                        "content": result.assistant_summary,
+                        "sources": [],
+                        "created_at": created_at,
+                    },
+                ],
+                "schedules": [],
+            }
+        )
+
+    def update_profile(
+        self, db: Session, session_id: int, changes: dict[str, str | None]
+    ) -> DashboardResponse:
+        if not changes:
+            raise ValueError("At least one profile field is required")
+
+        session = self._get_session(db, session_id)
+        for field, value in changes.items():
+            setattr(session, field, value)
+
+        result = self.llm_provider.recommend(self._prompt_for(session))
+        session.schedules.clear()
+        session.recommendations.clear()
+        self._store_recommendations(db, session, result)
+
+        initial_user_message = next((message for message in session.messages if message.role == "user"), None)
+        if initial_user_message is not None:
+            initial_user_message.content = self._profile_summary(session)
+        initial_assistant_message = next(
+            (message for message in session.messages if message.role == "assistant"), None
+        )
+        if initial_assistant_message is None:
+            db.add(
+                ConversationMessage(
+                    session_id=session.id, role="assistant", content=result.assistant_summary
+                )
+            )
+        else:
+            initial_assistant_message.content = result.assistant_summary
+
+        db.commit()
+        return self.get_dashboard(db, session.id)
+
+    def _store_recommendations(
+        self, db: Session, session: CoachingSession, result: LLMRecommendationResult
+    ) -> None:
         catalog_by_code = {item.code: item for item in db.scalars(select(Certification)).all()}
         for candidate in result.candidates:
             certification = catalog_by_code.get(candidate.certification_code)
@@ -131,7 +221,7 @@ class CoachingService:
             db.add(recommendation)
             db.flush()
             for schedule in self.schedule_provider.get_schedules(
-                certification.code, target_acquisition_period
+                certification.code, session.target_acquisition_period
             ):
                 db.add(
                     CertificationSchedule(
@@ -146,13 +236,77 @@ class CoachingService:
                         status=schedule.status,
                         source_name=schedule.source_name,
                         source_url=schedule.source_url,
+                        source_verified=(
+                            schedule.source_verified
+                            and self._official_source_matches(schedule.source_url, certification.official_url)
+                        ),
                         details=schedule.details,
                     )
                 )
 
+    @staticmethod
+    def _official_source_matches(source_url: str, official_url: str) -> bool:
+        try:
+            source = urlsplit(source_url)
+            official = urlsplit(official_url)
+            source_host = source.hostname
+            official_host = official.hostname
+            source_port = source.port
+            official_port = official.port
+        except ValueError:
+            return False
+        if (
+            source.scheme != "https"
+            or official.scheme != "https"
+            or not source_host
+            or not official_host
+            or source_port not in (None, 443)
+            or official_port not in (None, 443)
+            or source.username
+            or source.password
+            or official.username
+            or official.password
+        ):
+            return False
+        source_host = source_host.lower().rstrip(".")
+        official_host = official_host.lower().rstrip(".")
+        return source_host == official_host or source_host.endswith(f".{official_host}")
+
+    @staticmethod
+    def _prompt_for(session: CoachingSession) -> CoachingPrompt:
+        return CoachingPrompt(
+            desired_job=session.desired_job,
+            major_experience=session.major_experience,
+            owned_certifications=session.owned_certifications or [],
+            target_acquisition_period=session.target_acquisition_period,
+            interest_area=session.interest_area,
+            weekly_study_hours=session.weekly_study_hours,
+            learning_style=session.learning_style,
+            monthly_budget=session.monthly_budget,
+        )
+
+    @staticmethod
+    def _profile_summary(session: CoachingSession) -> str:
+        return (
+            f"관심 분야: {session.interest_area or '입력 없음'}\n"
+            f"주간 학습 시간: {session.weekly_study_hours or '입력 없음'}\n"
+            f"선호 학습 방식: {session.learning_style or '입력 없음'}\n"
+            f"월 학습 예산: {session.monthly_budget or '입력 없음'}"
+        )
+
+    @staticmethod
+    def _browser_profile_summary(profile: dict) -> str:
+        return (
+            f"관심 분야: {profile.get('interest_area') or '입력 없음'}\n"
+            f"주간 학습 시간: {profile.get('weekly_study_hours') or '입력 없음'}\n"
+            f"선호 학습 방식: {profile.get('learning_style') or '입력 없음'}\n"
+            f"월 학습 예산: {profile.get('monthly_budget') or '입력 없음'}"
+        )
+
+    def delete_session(self, db: Session, session_id: int) -> None:
+        session = self._get_session(db, session_id)
+        db.delete(session)
         db.commit()
-        dashboard = self.get_dashboard(db, session.id)
-        return SessionCreatedResponse(**dict(dashboard), access_token=access_token)
 
     def get_dashboard(self, db: Session, session_id: int) -> DashboardResponse:
         session = self._get_session(db, session_id)

@@ -72,7 +72,7 @@
 .brand-copy { align-items: flex-start; flex-direction: column; gap: 2px; }
 .brand-name { font-size: 16px; font-weight: 750; letter-spacing: -.03em; }
 .brand-caption { color: var(--muted-foreground); font-size: 11px; }
-.demo-badge { color: #77512f; background: #f6ebdc; border-color: #ead8c0; }
+.session-badge { color: #77512f; background: #f6ebdc; border-color: #ead8c0; }
 .welcome-row { justify-content: space-between; gap: 28px; padding: 0 0 26px; }
 .eyebrow { margin: 0 0 7px; color: #92724e; font-size: 10px; font-weight: 750; letter-spacing: .12em; }
 .welcome-row h1 { margin: 0; font-size: clamp(27px, 4vw, 37px); letter-spacing: -.055em; line-height: 1.25; }
@@ -99,7 +99,7 @@
 .main-column, .side-column { display: grid; gap: 15px; }
 .panel-heading { justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
 .panel-heading h2 { margin: 0; font-size: 22px; letter-spacing: -.045em; }
-.sample-badge { flex: 0 0 auto; color: #77512f; }
+.recommendation-count-badge { flex: 0 0 auto; color: #77512f; }
 .featured-card { overflow: hidden; border-color: #ead8c0; background: linear-gradient(135deg,#fff 0%,#fffaf2 100%); box-shadow: 0 10px 30px #59401a0b; }
 .featured-card-content { padding: 22px; }
 .featured-topline { justify-content: space-between; gap: 12px; }
@@ -110,7 +110,7 @@
 .featured-body h3 { margin: 0; font-size: 25px; letter-spacing: -.04em; }
 .featured-description { max-width: 460px; margin: 7px 0 0; color: var(--muted-foreground); font-size: 13px; line-height: 1.7; }
 .featured-emblem { display: grid; width: 58px; height: 58px; flex: 0 0 auto; place-items: center; color: #875a2f; background: #f6eadb; border-radius: 19px; }
-.profile-context { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; padding: 14px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.profile-context { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 10px; padding: 14px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
 .profile-context > div { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
 .profile-context span { color: var(--muted-foreground); font-size: 10px; }
 .profile-context strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
@@ -166,7 +166,7 @@
 .schedule-source-content p { margin: 4px 0 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.6; }
 .source-icon { display: grid; width: 38px; height: 38px; flex: 0 0 auto; place-items: center; color: #08738b; background: #e1f2f5; border-radius: 12px; }
 .source-status { flex: 0 0 auto; }
-.local-badge { flex: 0 0 auto; gap: 5px; color: #27704a; }
+.session-status-badge { flex: 0 0 auto; gap: 5px; color: #27704a; }
 .profile-layout { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(250px,.8fr); align-items: start; gap: 16px; }
 .profile-form-card, .profile-preview-card { box-shadow: 0 5px 22px #59401a08; }
 .profile-form { display: grid; gap: 17px; }
@@ -188,7 +188,7 @@
 .local-data-note { display: flex; align-items: center; gap: 8px; margin: 0 -17px -17px; padding: 12px 17px; color: #08738b; background: #f3fafb; border-top: 1px solid var(--border); font-size: 10px; }
 .profile-skeleton { display: grid; gap: 18px; padding: 2px 0 8px; }
 .skeleton-field { height: 56px; }
-.chat-demo-badge { flex: 0 0 auto; color: #77512f; }
+.chat-session-badge { flex: 0 0 auto; color: #77512f; }
 .chat-card { overflow: hidden; box-shadow: 0 5px 22px #59401a08; }
 .chat-topline { gap: 10px; padding: 15px 18px; border-bottom: 1px solid var(--border); }
 .chat-coach-avatar { display: grid; width: 37px; height: 37px; place-items: center; color: #684421; background: #f0dfcb; border-radius: 12px; }
@@ -210,6 +210,20 @@
 .chat-input { min-height: 38px; max-height: 120px; resize: vertical; background: #fff; font-size: 12px; }
 .chat-disclaimer { margin: 0; padding: 0 18px 14px; color: var(--muted-foreground); font-size: 10px; }
 .page-footer { display: flex; justify-content: space-between; gap: 12px; padding-top: 30px; color: #8e857b; font-size: 10px; }
+.dashboard-alert { margin: 0 0 16px; }
+.dashboard-alert-content { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.recommend-empty { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.recommend-empty [data-slot="alert-description"] { flex: 1 1 100%; }
+.recommend-empty button { margin-left: auto; }
+.empty-copy { margin: 0; color: var(--muted-foreground); font-size: 11px; }
+.schedule-dates { display: grid; gap: 5px; padding-top: 9px; color: var(--muted-foreground); font-size: 10px; }
+.schedule-checked-at { color: var(--muted-foreground); font-size: 9px; }
+.schedule-step a, .featured-actions a { color: #08738b; font-size: 11px; text-underline-offset: 3px; }
+.schedule-step a { margin-top: auto; padding-top: 12px; }
+.message-sources { display: grid; gap: 5px; margin: 8px 0 0; padding-left: 16px; font-size: 10px; }
+.message-sources a { color: #08738b; text-underline-offset: 2px; }
+.chat-empty { align-self: flex-start; padding: 10px 13px; color: var(--muted-foreground); background: #f5f0e7; border-radius: 13px; font-size: 12px; }
+.chat-notices { margin: 0 18px 13px; }
 
 @media (max-width: 760px) {
   .app-shell { width: min(100% - 32px, 560px); padding-top: 17px; }
@@ -225,6 +239,7 @@
   .side-column { grid-template-columns: repeat(2,minmax(0,1fr)); align-items: start; }
   .source-note { grid-column: 1 / -1; }
   .profile-layout { grid-template-columns: minmax(0,1fr); }
+  .dashboard-alert-content { align-items: flex-start; flex-direction: column; }
 }
 
 @media (max-width: 480px) {
@@ -242,7 +257,7 @@
   .featured-topline { align-items: flex-start; flex-direction: column; gap: 8px; }
   .featured-body h3 { font-size: 22px; }
   .featured-emblem { width: 48px; height: 48px; }
-  .profile-context { gap: 7px; }
+  .profile-context { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
   .profile-context span { font-size: 9px; }
   .profile-context strong { font-size: 10px; }
   .side-column, .schedule-grid { grid-template-columns: minmax(0,1fr); }

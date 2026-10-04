@@ -1,5 +1,5 @@
 import logging
-from datetime import date
+from datetime import UTC, datetime
 
 from app.providers.base import (
     CertificationCandidate,
@@ -25,8 +25,8 @@ SYSTEM_PROMPT = """너는 처음 자격증 준비를 시작하는 사람을 돕�
   "candidates": [
     {{"certification_code": "카탈로그의 code 그대로",
       "match_score": 0~100 숫자,
-      "reason": "희망직무·경험과 연결한 추천 이유 1~2문장",
-      "study_plan_hint": "목표 취득 시기에 맞춘 학습 조언 1문장"}}
+      "reason": "관심 분야와 학습 여건에 연결한 추천 이유 1~2문장",
+      "study_plan_hint": "주간 학습 여건에 맞춘 학습 조언 1문장"}}
   ]}}
 
 규칙:
@@ -70,21 +70,27 @@ class GroqLLMProvider:
         )
         user_text = (
             f"[사용자 조건]\n"
-            f"희망직무: {prompt.desired_job}\n"
+            f"관심 분야: {prompt.interest_area or '입력 없음'}\n"
+            f"주간 학습 시간: {prompt.weekly_study_hours or '입력 없음'}\n"
+            f"선호 학습 방식: {prompt.learning_style or '입력 없음'}\n"
+            f"월 학습 예산: {prompt.monthly_budget or '입력 없음'}\n"
+            f"이전 버전 희망직무: {prompt.desired_job or '입력 없음'}\n"
             f"전공 관련 경험: {prompt.major_experience or '입력 없음'}\n"
             f"보유 자격증: {', '.join(prompt.owned_certifications) or '없음'}\n"
-            f"목표 취득 시기: {prompt.target_acquisition_period}\n\n"
+            f"이전 버전 목표 취득 시기: {prompt.target_acquisition_period or '입력 없음'}\n\n"
             f"[자격증 카탈로그]\n{catalog_text}\n\n"
             f"[참고 검색 결과]\n{self._research(prompt)}"
         )
-        system = SYSTEM_PROMPT.format(max_candidates=MAX_CANDIDATES, today=date.today().isoformat())
+        today = datetime.now(UTC).date()
+        system = SYSTEM_PROMPT.format(max_candidates=MAX_CANDIDATES, today=today.isoformat())
         return [{"role": "system", "content": system}, {"role": "user", "content": user_text}]
 
     def _research(self, prompt: CoachingPrompt) -> str:
         if self.search is None:
             return "(검색 미사용)"
         try:
-            hits = self.search.search(f"{prompt.desired_job} 취업 추천 자격증 {date.today().year}")
+            interest = prompt.interest_area or prompt.desired_job or "자격증"
+            hits = self.search.search(f"{interest} 관련 추천 자격증 {datetime.now(UTC).year}")
         except SearchError as error:
             logger.warning("추천용 검색 실패: %s", error)
             return "(검색 실패)"

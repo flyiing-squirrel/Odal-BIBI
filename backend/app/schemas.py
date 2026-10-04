@@ -1,28 +1,45 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class CoachInput(BaseModel):
-    """The four inputs collected by the dashboard."""
+    """Profile fields collected by the dashboard plus optional legacy fields."""
 
-    desired_job: str = Field(..., min_length=1, max_length=200, description="희망직무")
-    major_experience: str | None = Field(default=None, max_length=3000, description="전공 관련 경험")
-    owned_certifications: list[str] = Field(default_factory=list, description="보유 자격증")
-    target_acquisition_period: str = Field(
-        ..., min_length=1, max_length=100, description="목표 취득 시기"
-    )
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    interest_area: str = Field(..., min_length=1, max_length=200, description="관심 분야")
+    weekly_study_hours: str | None = Field(default=None, max_length=100, description="주간 학습 시간")
+    learning_style: str | None = Field(default=None, max_length=100, description="선호 학습 방식")
+    monthly_budget: str | None = Field(default=None, max_length=100, description="월 학습 예산")
+    desired_job: str | None = Field(default=None, max_length=200, description="이전 버전 희망직무")
+    major_experience: str | None = Field(default=None, max_length=3000, description="이전 버전 전공 경험")
+    owned_certifications: list[str] | None = Field(default=None, description="이전 버전 보유 자격증")
+    target_acquisition_period: str | None = Field(default=None, max_length=100, description="이전 버전 목표 시기")
+
+
+class ProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    interest_area: str | None = Field(default=None, min_length=1, max_length=200)
+    weekly_study_hours: str | None = Field(default=None, max_length=100)
+    learning_style: str | None = Field(default=None, max_length=100)
+    monthly_budget: str | None = Field(default=None, max_length=100)
 
 
 class SessionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    desired_job: str
+    desired_job: str | None
     major_experience: str | None
-    owned_certifications: list[str]
-    target_acquisition_period: str
+    owned_certifications: list[str] | None
+    target_acquisition_period: str | None
+    interest_area: str | None
+    weekly_study_hours: str | None
+    learning_style: str | None
+    monthly_budget: str | None
     created_at: datetime
 
 
@@ -77,6 +94,24 @@ class ChatMessageCreate(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000, description="사용자 메시지")
 
 
+class BrowserConversationMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    id: int = Field(..., ge=1)
+    role: Literal["user", "assistant", "system"]
+    content: str = Field(..., min_length=1, max_length=4000)
+    sources: list[SourceItem] = Field(default_factory=list, max_length=8)
+    created_at: datetime
+
+
+class BrowserChatMessageCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    profile: CoachInput
+    conversation: list[BrowserConversationMessage] = Field(default_factory=list, max_length=20)
+    message: str = Field(..., min_length=1, max_length=2000, description="사용자 메시지")
+
+
 class ChatReplyResponse(BaseModel):
     session_id: int
     intent: Literal["recommend", "schedule", "study_path", "general"]
@@ -99,6 +134,7 @@ class ScheduleResponse(BaseModel):
     status: str
     source_name: str
     source_url: str
+    source_verified: bool
     details: str | None
     fetched_at: datetime
     certification: CertificationSummary
@@ -111,9 +147,8 @@ class DashboardResponse(BaseModel):
     schedules: list[ScheduleResponse]
 
 
-class SessionCreatedResponse(DashboardResponse):
-    # 이 응답에서만 한 번 내려준다. 이후 모든 세션 요청에 X-Session-Token 헤더로 보내야 한다.
-    access_token: str
+class CreateSessionResponse(DashboardResponse):
+    session_token: str
 
 
 class MessageListResponse(BaseModel):
@@ -129,4 +164,39 @@ class RecommendationListResponse(BaseModel):
 class ScheduleListResponse(BaseModel):
     session_id: int
     items: list[ScheduleResponse]
+
+
+class GoogleCalendarStatusResponse(BaseModel):
+    connected: bool
+    requires_reauthorization: bool = False
+    calendar_name: str | None = None
+
+
+class GoogleCalendarConnectResponse(BaseModel):
+    authorization_url: str
+
+
+class GoogleOAuthCallbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    state: str = Field(min_length=32, max_length=256)
+    code: str | None = Field(default=None, min_length=1, max_length=4096)
+    error: str | None = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def code_or_error_required(self):
+        if self.code is None and self.error is None:
+            raise ValueError("OAuth callback is incomplete")
+        if self.code is not None and self.error is not None:
+            raise ValueError("OAuth callback is ambiguous")
+        return self
+
+
+class GoogleOAuthCallbackResponse(BaseModel):
+    status: Literal["connected", "cancelled"]
+
+
+class CalendarEventSyncResponse(BaseModel):
+    synced: bool
+    event_id: str
 
