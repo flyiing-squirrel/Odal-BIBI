@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # .env는 저장소 루트에 하나만 둔다 (backend/에서 실행해도 루트 .env를 읽음).
