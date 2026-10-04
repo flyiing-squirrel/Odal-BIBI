@@ -115,20 +115,20 @@
 
 ## Task 6: 배포 의존성·Vercel 환경변수 문서 준비
 
-**Files:** `package.json`, `package-lock.json`, `backend/pyproject.toml`, `backend/uv.lock`, `.env.example`, 신규 `docs/deployment/vercel.md`, `README.md`.
+**Files:** `package.json`, `package-lock.json`, `backend/pyproject.toml`, `backend/uv.lock`, `backend/requirements.txt`, `.env.example`, 신규 `docs/deployment/vercel.md`, `README.md`.
 
-- [ ] `shadcn` CLI를 개발 의존성으로 이동하고 lockfile을 갱신한다. `npm audit`의 기존 취약점은 영향 경로를 검토하고, major 버전 강제 업그레이드 없이 해결 가능한 것만 수정한다.
-- [ ] Python 3.12 런타임 pin과 `uv.lock`을 반영한다. Vercel 백엔드 프로젝트의 root directory를 `/backend`로 두고 `backend/pyproject.toml`에 `[tool.vercel] entrypoint = "app.main:app"`을 설정한다.
-- [ ] Vercel 프로젝트별 환경변수 표를 작성한다.
+- [x] `shadcn` CLI를 개발 의존성으로 이동하고 lockfile을 갱신한다. `npm audit`의 기존 취약점은 영향 경로를 검토하고, major 버전 강제 업그레이드 없이 해결 가능한 것만 수정한다. `braces@3.0.3`의 GHSA-vfj7-8cjw-p6xm는 수정 버전이 없어 남겨두고 배포 문서에 기록한다.
+- [x] Python 3.12 런타임 pin과 `uv.lock`을 반영한다. Vercel 백엔드 프로젝트의 root directory를 `/backend`로 두고 `backend/pyproject.toml`에 `[tool.vercel] entrypoint = "app.main:app"`을 설정한다. Vercel 런타임 `requirements.txt`에서는 `httpx`·`pytest`를 제거하고 `uv`의 dev extra에만 둔다.
+- [x] Vercel 프로젝트별 환경변수 표를 작성한다.
   - 루트 Next.js 프로젝트: `BACKEND_API_URL`, `BFF_SHARED_SECRET`, 허용 origin 및 프런트 전용 설정
   - `/backend` FastAPI 프로젝트: `DATABASE_URL`, `BFF_SHARED_SECRET`, `APP_ENV`, `CORS_ORIGINS`, DB pool 설정, `GROQ_API_KEY`, `GROQ_MODEL`, `TAVILY_API_KEY`, Google OAuth·암호화 설정
-- [ ] Groq와 Tavily 키 추가 절차를 `/backend` 프로젝트 기준으로 적는다. Dashboard의 **Settings → Environment Variables**에서 우선 **Preview**만 선택해 등록하고, 값 공개가 제한된 Sensitive 옵션을 사용한다. `NEXT_PUBLIC_` 변수로 만들지 않는다. Preview에서 채팅 및 검색이 동작하고 릴리스 승인을 받은 후 Production에 별도 등록한다.
-- [ ] Preview/Production의 DB URL은 서로 다른 데이터베이스로 설정한다. 앱은 provider의 pooled URL, DBeaver는 direct URL을 사용하고 두 값을 구분해 기록한다.
-- [ ] 변경을 `docs: document Vercel monorepo deployment settings` 메시지로 커밋한다.
+- [x] Groq와 Tavily 키 추가 절차를 `/backend` 프로젝트 기준으로 적는다. Dashboard의 **Settings → Environment Variables**에서 우선 **Preview**만 선택해 등록하고, 값을 저장 후 다시 읽을 수 없는 **Secret** 유형을 사용한다. `NEXT_PUBLIC_` 변수로 만들지 않는다. Preview에서 채팅 및 검색이 동작하고 릴리스 승인을 받은 후 Production에 별도 등록한다.
+- [x] Preview/Production의 DB URL은 서로 다른 데이터베이스로 설정한다. 앱은 provider의 pooled URL, DBeaver는 direct URL을 사용하고 두 값을 구분해 기록한다.
+- [x] 변경을 `docs: document Vercel monorepo deployment settings` 메시지로 커밋한다.
 
 **Interfaces:** 현재 `backend/app/core/config.py`가 읽는 `GROQ_API_KEY`와 `TAVILY_API_KEY` 이름을 유지한다. Next.js 클라이언트 bundle에는 이 두 설정이 전혀 참조되지 않는다. Vercel 변수 변경 후 새 배포를 생성해야 적용된다.
 
-**Verification:** `npm run lint`, `npm run build`, `python -m compileall -q backend/app`, `git diff --check`, `npm audit --omit=dev --audit-level=high` 결과를 검토한다. 의존성 취약점 해결이 강제 major 변경을 요구하면 변경하지 않고 남은 위험과 경로를 문서화한다.
+**Verification:** `npm run lint`, `npm run build`, `uv run python -m compileall -q app`, `uvx ruff check --ignore B008 --exclude tests .`, `uv lock --check`, `git diff --check`, `npm audit --omit=dev --audit-level=high` 결과를 검토한다. 의존성 취약점 해결이 강제 major 변경을 요구하면 변경하지 않고 남은 위험과 경로를 문서화한다. 테스트는 실행하지 않는다.
 
 ## Task 7: 프리뷰 배포 구성 및 운영 준비 점검
 

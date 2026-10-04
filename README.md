@@ -86,9 +86,10 @@ PostgreSQL은 `localhost:5432`(계정 `odal`/`odal`, DB `odal`)로 열리며 데
 | `.env` | 커밋 안 함 (`.gitignore`) | 실제 키 **값**, 각자 PC에만 둠 |
 
 - Groq·Tavily 키는 자신의 `.env`에만 넣고 프런트엔드 코드나 `NEXT_PUBLIC_` 변수로 노출하지 않습니다. Vercel 배포 시에는 `/backend` 프로젝트의 서버 환경변수로 설정합니다.
+- Vercel 프로젝트 분리, Preview 단계 API 키 등록, PostgreSQL 접속 정보 구성은 [Vercel 배포 설정 안내](docs/deployment/vercel.md)를 따릅니다.
 - Next.js와 FastAPI는 동일한 `BFF_SHARED_SECRET` 값을 사용해야 합니다. 최소 32바이트의 무작위 값을 사용합니다. 이 값은 두 서버 런타임에서만 보관합니다.
 - 새 환경변수가 생기면 `.env.example`에 이름만 추가합니다.
-- 배포 시에는 배포 서비스의 환경변수 설정이나 GitHub Secrets를 사용합니다. `.env`는 루트에 있어 백엔드 Docker 이미지(`backend/` 빌드)에 포함되지 않습니다.
+- 배포 시에는 Vercel의 프로젝트 환경변수에 키를 입력합니다. 실제 키는 저장소·GitHub 파일·Next.js 브라우저 코드에 두지 않습니다. `.env`는 루트에 있어 백엔드 Docker 이미지(`backend/` 빌드)에 포함되지 않습니다.
 - 키가 커밋·push 되었다면 커밋 삭제만으로는 부족합니다. 즉시 해당 콘솔에서 키를 폐기하고 재발급합니다.
 
 ### API 흐름

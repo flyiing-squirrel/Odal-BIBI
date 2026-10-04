@@ -10,6 +10,4 @@ tavily-python>=0.5,<1.0
 cryptography>=43,<48
 google-auth-oauthlib>=1.2,<2.0
 requests>=2.32,<3.0
-httpx>=0.27,<1.0
-pytest>=8.0,<9.0
 
